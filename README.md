@@ -2,39 +2,47 @@
 
 OpenBK7231T/OpenBeken is a Tasmota/Esphome replacement for new Tuya modules featuring MQTT and Home Assistant compatibility.
 This repository is named "OpenBK7231T_App", but now it's a multiplatform app, supporting build for multiple separate chips:
-- BK7231T ([WB3S](https://developer.tuya.com/en/docs/iot/wb3s-module-datasheet?id=K9dx20n6hz5n4), [WB2S](https://developer.tuya.com/en/docs/iot/wb2s-module-datasheet?id=K9ghecl7kc479), WB2L, etc)
-- BK7231N ([CB2S](https://developer.tuya.com/en/docs/iot/cb2s-module-datasheet?id=Kafgfsa2aaypq), [CB2L](https://developer.tuya.com/en/docs/iot/cb2l-module-datasheet?id=Kai2eku1m3pyl), WB2L_M1, etc)
+- [BK7231T](https://www.elektroda.com/rtvforum/topic3951016.html) ([WB3S](https://developer.tuya.com/en/docs/iot/wb3s-module-datasheet?id=K9dx20n6hz5n4), [WB2S](https://developer.tuya.com/en/docs/iot/wb2s-module-datasheet?id=K9ghecl7kc479), WB2L, etc)
+- [BK7231N](https://www.elektroda.com/rtvforum/topic3951016.html) ([CB2S](https://developer.tuya.com/en/docs/iot/cb2s-module-datasheet?id=Kafgfsa2aaypq), [CB2L](https://developer.tuya.com/en/docs/iot/cb2l-module-datasheet?id=Kai2eku1m3pyl), [WB2L_M1](https://www.elektroda.com/rtvforum/topic3903356.html), etc)
 - T34 ([T34 is based on BK7231N](https://developer.tuya.com/en/docs/iot/t34-module-datasheet?id=Ka0l4h5zvg6j8))
 - BL2028N ([BL2028N is a Belon version of BK7231N](https://www.elektroda.com/rtvforum/viewtopic.php?p=20262533#20262533))
-- XR809 ([XR3](https://developer.tuya.com/en/docs/iot/xr3-datasheet?id=K98s9168qi49g), etc)
-- BL602
+- [XR809](https://www.elektroda.com/rtvforum/topic3806769.html) ([XR3](https://developer.tuya.com/en/docs/iot/xr3-datasheet?id=K98s9168qi49g), etc)
+- [BL602](https://www.elektroda.com/rtvforum/topic3889041.html) ([SM-028_V1.3 etc](https://www.elektroda.com/rtvforum/topic3945435.html))
 - W800 (W800-C400, WinnerMicro WiFi & Bluetooth), W801
-- W600 (WinnerMicro chip), W601
+- [W600](https://www.elektroda.com/rtvforum/viewtopic.php?p=20252619#20252619) (WinnerMicro chip), W601 ([WIS600, ESP-01W](https://www.elektroda.com/rtvforum/topic3950611.html), [TW-02](https://www.elektroda.com/rtvforum/viewtopic.php?p=20239610#20239610), [TW-03](https://www.elektroda.com/rtvforum/topic3929601.html), etc)
 
 Please use automatically compiled binaries from the Releases tab. To build yourself for a given platform, just checkout first our version of SDK and then checkout this app repository into it, details later.
 
-# [Supported Devices List](https://openbekeniot.github.io/webapp/devicesList.html) (Teardown + Flashing Guide + Detailed photos + Template)
+[Russian guide for T34/BK7231N](https://www.v-elite.ru/t34)
+[Russian guide for BL602](https://www.v-elite.ru/bl602rgb)
+
+If you want to get some generic information about BK7231 modules, pinout, peripherals, [consult our docs topic](https://www.elektroda.com/rtvforum/topic3951016.html).
+
+# [Supported Devices/Templates List](https://openbekeniot.github.io/webapp/devicesList.html) (Get 🏆[free SD Card](https://www.elektroda.com/rtvforum/topic3950844.html)🏆 for submitting new one!)
 We have our own interactive devices database that is maintained by users.
 The database is also accessible from inside our firmware (but requires internet connection to fetch).
-Have a not listed device? HELP US, submit a teardown [here](https://www.elektroda.com/rtvforum/forum507.html).
-NOTE: Obviously almost any device with supported chip (BK7231, BL602, W600, etc is potentially supported and it's not possible to list all available devices in the market, so feel free to try even if your device is not listed - *we are here to help and guide you step by step*!)
+Have a not listed device? HELP US, submit a teardown [here](https://www.elektroda.com/rtvforum/posting.php?mode=newtopic&f=51) and 🏆**get free SD card and gadgets set**🏆 ! Thanks to cooperation with [Elektroda.com](https://www.elektroda.com/), if you submit a detailed teardown/article/review, we can send you [this set of gadgets](https://obrazki.elektroda.pl/1470574200_1670833596.jpg) for free (🚚shipping with normal letter🚚).
+NOTE: Obviously almost any device with supported chip (BK7231, BL602, W600, etc is potentially supported and it's not possible to list all available devices in the market, so feel free to try even if your device is not listed - *we are [here](https://www.elektroda.com/rtvforum/forum390.html) to help and guide you step by step*!)
+
 
 # Features
 
 OpenBeken features:
-- Tasmota-like setup, configuration and experience on all supported platforms
-- OTA firwmare upgrade system (for Beken chips); to use OTA, drag and drop RBL file (always RBL file) on OTA field on new Web App Javascript Console
-- MQTT compatibility with Home Assistant
-- Support for multiple relays, buttons, leds, inputs and PWMs
-- Driver system for custom peripherals, including TuyaMCU, I2C bus and BL0942, BL0937 power metering chips
+- Tasmota-like setup, configuration and experience on all supported platforms (supports common Tasmota JSON over http and MQTT, etc)
+- OTA firwmare upgrade system (for BK, W*00, BL602); to use OTA, drag and drop RBL file (always RBL file) on OTA field on new Web App Javascript Console
+- MQTT compatibility with Home Assistant (with both Yaml generator and [HA Discovery](https://youtu.be/pkcspey25V4)) 
+- Support for multiple relays, buttons, leds, inputs and PWMs, everything fully scriptable
+- Driver system for custom peripherals, including [TuyaMCU](https://www.elektroda.com/rtvforum/topic3898502.html), I2C bus and [BL0942](https://www.elektroda.com/rtvforum/topic3887748.html), BL0937 power metering chips
 - Supports multiple I2C devices, like TC74 temperature sensor, MCP23017 port expander, PCF8574T LCD 2x16 (or other?), etc
-- NTP time from network (can be used with TH06 and other TuyaMCU devices)
-- basic support for TuyaMCU Battery Powered devices protocol (TuyaMCU enables WiFi module only to report the state, eg. for door sensors, water sensors)
+- NTP time from network (can be used with [TH06](https://www.elektroda.com/rtvforum/topic3942730.html) and other TuyaMCU devices)
+- basic support for [TuyaMCU Battery Powered devices protocol](https://www.elektroda.com/rtvforum/topic3914412.html) (TuyaMCU enables WiFi module only to report the state, eg. for door sensors, water sensors)
 - RGBCW LED lighting control compatible with Home Assistant (both PWM LEDs, SM2135 LEDs and BP5758 LEDs)
 - LittleFS integration for large files (resides in OTA memory, so you have to backup it every time you OTA)
 - Command line system for starting and configuring drivers
 - Short startup command (up to 512 characters) storage in flash config, so you can easily init your drivers (eg. BL0942) without LittleFS
-- Simple scripting and events system (allows you to mirror Tasmota rules, for example catch button click, double click, hold)
+- Advanced scripting and events system (allows you to mirror Tasmota rules, for example catch button click, double click, hold)
+- Easily configurable via commands (see [tutorial](https://www.elektroda.com/rtvforum/topic3947241.html))
+- Thanks to keeping Tasmota standard, OBK has basic compatibility with [ioBroker](https://www.youtube.com/watch?v=x4p3JHXbK1E&ab_channel=Elektrodacom) and similiar systems through TELE/STAT/CMND MQTT packets
 - Automatic reconnect when WiFi network goes out
 - and much more
 
@@ -53,13 +61,30 @@ A: Do five short power on/power off cycles (but not too short, because device mi
 <em>Q: I somehow lost my MAC address and I am unable to change it in Options! My MAC ends with 000000, how to fix?</em><br>
 A: You have most likely overwrote the TLV header of RF partition of BK7231. For BK7231T, we have a way to restore it - open Web App, go to Flash tab, and press "Restore RF Config"
 
+<em>Q: How do I setup single button to control two relays (first on click, second on double click)?</em><br>
+A: If you set a pin role to "Button", you will get a second textbox after saving pins. First checkbox is a channel to toggle on single click, and second textbox is a channel to toggle on double click.
+
+<em>Q: My wall touch switch reacts slowly! It's laggy, how to make it react instantly?</em><br>
+A: It's like with Tasmota - go to our Options/General-Flags and set flag "6 - [BTN] Instant touch reaction instead of waiting for release (aka SetOption 13)"
+
+<em>Q: How to enter multiple startup commands? For example, to start both NTP and BL0942 drivers?</em><br>
+A: Use backlog - like in Tasmota. Open Config->Short startup command, and enter, for example: backlog startDriver BL0942; startDriver NTP; ntp_setServer 217.147.223.78
+
+<em>Q: How to configure ping watchdog to do a relay cycle when given IP does not respond for a given amount of time?</em><br>
+A: See the following example there: https://www.elektroda.com/rtvforum/viewtopic.php?p=20368812#20368812
+
 # Building
 
 OpenBeken supports online builds for all platforms (BK7231T, BK7231N, XR809, BL602, W800), but if you want to compile it yourself, see  [BUILDING.md](https://github.com/openshwprojects/OpenBK7231T_App/blob/main/BUILDING.md)
 
-# Flashing for BK7231T
+# Flashing for BK7231 (BK7231T and BK7231N) on Windows - easy method for beginners
 
-## UART (Windows only)
+Use our new BK7231 GUI Flash tool:
+https://github.com/openshwprojects/BK7231GUIFlashTool
+
+# Flashing for BK7231T (alternate method)
+
+## UART (obsolete method; Windows only)
 
 get BKwriter 1.60 exe (extract zip) from [here](https://github.com/openshwprojects/OpenBK7231T/blob/master/bk_writer1.60.zip)
   
@@ -70,7 +95,7 @@ connect the PC to TX1 and RX1 on the bk7231 (TX2 and RX2 are optional, only for 
 start flash in BKwriter 1.60 (select COM port, etc)
 then re-power the device (or reset with CEN by temporary connecting CEN to ground) until the flashing program continues, repeat if required.
   
-## UART (multiplatform method, Python required)
+## UART (obsolete method; multiplatform method, Python required)
 
 clone the repo https://github.com/OpenBekenIOT/hid_download_py
   
@@ -94,11 +119,9 @@ See: https://github.com/openshwprojects/BK7231_SPI_Flasher
 
 ## OTA
 
-Once the firmware has been flashed for the first time, it can be flashed over wifi (note: change hardcoded firmware URL in new_http.c)
+Once the firmware has been flashed for the first time, it can be flashed over wifi.
 
-Setup a simple webserver to serve `<sdk folder>\apps\<folder>\output\1.0.0\<appname>_<appversion>.rbl`
-
-Visit <ip>/ota - here start the flashing process.
+Go to "Open Web Application", OTA tab, drag and drop proper RBL file on the field, press a button to start OTA proccess
 
 ## First run
 
@@ -110,7 +133,7 @@ Once you are connected and have an IP, go to http://192.168.4.1/index , select c
 
 After a reboot, the device should connect to your lan.
 
-# Flashing for BK7231N
+# Flashing for BK7231N (obsolete method)
 
 BKwriter 1.60 doesn't work for BK7231N for me, in BK7231 mode it errors with "invalid CRC" and in BK7231N mode it fails to unprotect the device.
 For BK7231N, one should use:
@@ -190,49 +213,8 @@ Currently available pin roles:
 
 There are multiple console commands that allow you to automate your devices. Commands can be entered manually in command line, can be send by HTTP (just like in Tasmota), can be send by MQTT and also can be scripted.
 
-| Command        | Arguments          | Description  |
-| ------------- |:-------------:| -----:|
-| setChannel     | [ChannelIndex][ChannelValue] | Sets a raw channel to given value. Relay channels are using 1 and 0 values. PWM channels are within [0,100] range. Do not use this for LED control, because there is a better and more advanced LED driver with dimming and configuration memory (remembers setting after on/off), LED driver commands has "led_" prefix. |
-| addChannel     | [ChannelIndex][ValueToAdd][ClampMin][ClampMax] | Ads a given value to the channel. Can be used to change PWM brightness. Clamp min and max arguments are optional. |
-| setPinRole     | [PinRole][RoleIndexOrName] | This allows you to set a pin role, for example a Relay role, or Button, etc. Usually it's easier to do this through WWW panel, so you don't have to use this command.  |
-| setPinChannel     | [PinRole][ChannelIndex] | This allows you to set a channel linked to pin from console. Usually it's easier to do this through WWW panel, so you don't have to use this command. |
-| addRepeatingEvent     | [IntervalSeconds][RepeatsOr-1][CommandToRun] | Starts a timer/interval command. Use "backlog" to fit multiple commands in a single string. |
-| addEventHandler     | [EventName][EventArgument][CommandToRun] | This can be used to trigger an action on a button click, long press, etc |
-| addChangeHandler     | [Variable][Relation][Constant][Command] | This can listen to change in channel value (for example channel 0 becoming 100), or for a voltage/current/power change for BL0942/BL0937. This supports multiple relations, like ==, !=, >=, < etc. The Variable name for channel is Channel0, Channel2, etc, for BL0XXX it can be "Power", or "Current" or "Voltage" |
-| sendGet     | [TargetURL] | Sends a HTTP GET request to target URL. May include GET arguments. Can be used to control devices by Tasmota HTTP protocol. |
-| publish     | [Topic][Value] | Publishes data by MQTT. The final topic will be obk0696FB33/[Topic]/get |
-| linkTuyaMCUOutputToChannel     | [dpId][varType][channelID] | Used to map between TuyaMCU dpIDs and our internal channels. Mapping works both ways. DpIDs are per-device, you can get them by sniffing UART communication. Vartypes can also be sniffed from Tuya. VarTypes can be following: 0-raw, 1-bool, 2-value, 3-string, 4-enum, 5-bitmap  |
-| tuyaMcu_setBaudRate     | [BaudValue] | Sets the baud rate used by TuyaMCU UART communication. Default value is 9600. |
-| led_enableAll     | [1or0] | Power on/off LED but remember the RGB(CW) values. |
-| led_basecolor_rgb     | [HexValue] | Puts the LED driver in RGB mode and sets given color. |
-| led_basecolor_rgbcw     | [HexValue] | TODO |
-| led_temperature     | [TempValue] | Toggles LED driver into temperature mode and sets given temperature. It using Home Assistant temperature range (in the range from 154-500 defined in homeassistant/util/color.py as HASS_COLOR_MIN and HASS_COLOR_MAX) |
-| led_dimmer     | [DimmerValue] | Used to dim all kinds of lights, works for both RGB and CW modes. |
-| add_dimmer     | [DimmerDeltaValue] | This ads a given value (can be negative) to current dimmer settings, works for both RGB and CW modes. |
-| led_brightnessMult     | [Value] | Internal usage only. |
-| led_colorMult     | [Value] | Internal usage only. |
-| led_saturation     | [Value] | This is an alternate way to set the LED color. |
-| led_hue     | [Value] | This is an alternate way to set the LED color. |
-| SM2135_Map     | [Ch0][Ch1][Ch2][Ch3][Ch4] | Maps the RGBCW values to given indices of SM2135 channels. This is because SM2135 channels order is not the same for some devices. Some devices are using RGBCW order and some are using GBRCW, etc, etc. |
-| SM2135_RGBCW     | [HexColor] | Don't use it. It's for direct access of SM2135 driver. You don't need it because LED driver automatically calls it, so just use led_basecolor_rgb |
-| BP5758D_Map     | [Ch0][Ch1][Ch2][Ch3][Ch4] | Maps the RGBCW values to given indices of BP5758D channels. This is because BP5758D channels order is not the same for some devices. Some devices are using RGBCW order and some are using GBRCW, etc, etc. |
-| BP5758D_RGBCW     | [HexColor] | Don't use it. It's for direct access of BP5758D driver. You don't need it because LED driver automatically calls it, so just use led_basecolor_rgb |
-| loglevel     | [Value]  | Correct values are 0 to 7. Default is 3. Higher value includes more logs. Log levels are: ERROR = 1, WARN = 2, INFO = 3, DEBUG = 4, EXTRADEBUG = 5. WARNING: you also must separately select logging level filter on web panel in order for more logs to show up there |
-| logdelay     | [Value] | Value is a number of ms. This will add an artificial delay in each log call. Useful for debugging. This way you can see step by step what happens. |
-| restart     |  | Reboots the device. |
-| clearConfig     |  | Clears all the device config and returns it to AP mode. |
-| VoltageSet     | [Value] | Used for BL0942/BL0937/etc calibration. Refer to BL0937 guide for more info. |
-| PowerSet     | [Value] | Used for BL0942/BL0937/etc calibration. Refer to BL0937 guide for more info. |
-| CurrentSet     | [Value] | Used for BL0942/BL0937/etc calibration. Refer to BL0937 guide for more info. |
-| DGR_SendPower     | [GroupName][ChannelValues][ChannelsCount] | Sends a POWER message to given Tasmota Device Group with no reliability. Requires no prior setup and can control any group, but won't retransmit. |
-| DGR_SendBrightness     | [GroupName][Brightness] | Sends a Brightness message to given Tasmota Device Group with no reliability. Requires no prior setup and can control any group, but won't retransmit. |
-| EnergyCntReset | | Used for BL0942/BL0937/etc consumption measurement data reset |
-| SetupEnergyStats | [enable] [sample_time] [sample_count] [enableJSON] | Used for BL0942/BL0937/etc. Configure consumptio history stats. enable: 0/1 sample_time:10..900 sample_count: 10..180 enableJSON: 0/1 |
-| PowerMax | [limit] | Used for BL0937 to setup limiter for maximal output filter based on device definition 3680W for 16A devices. Prevention of sending ridicilus numbers to Cloud |
-| ConsumptionThreshold | [threshold] | Used for BL0942/BL0937/etc for define threshold for change of total counter to execute automatic store of consumption counters to flash |
-
-Are you looking for extra commands? Just search the code:
-https://github.com/openshwprojects/OpenBK7231T_App/search?q=CMD_RegisterCommand
+## [Autogenerated Complete Commands List](https://github.com/openshwprojects/OpenBK7231T_App/blob/main/docs/commands.md)
+## [Autogenerated Complete Commands List - Extended Info](https://github.com/openshwprojects/OpenBK7231T_App/blob/main/docs/commands-extended.md)
 
 There is also a conditional exec command. Example:
 if MQTTOn then "backlog led_dimmer 100; led_enableAll" else "backlog led_dimmer 10; led_enableAll"
@@ -447,20 +429,33 @@ looper:
 
 # Channel Types
 
-Channel types are often not required and don't have to be configured, but in some cases they are required for better device control from OpenBeken web panel. Channel types describes the kind of value stored in channel, for example, if you have a Tuya Fan Controller with 3 speeds control,  you can set the channel type to LowMidHigh and it will display the correct setting on OpenBeken panel.
+Channel types are often not required and don't have to be configured, but in some cases they are required for better device control from OpenBeken web panel. Channel types describes the kind of value stored in channel, for example, if you have a Tuya Fan Controller with 3 speeds control,  you can set the channel type to LowMidHigh and it will display the correct UI radiobutton on OpenBeken panel.
 
+Some channels have "_div10" or "_div100" sufixes. This is for TuyaMCU. This is needed because TuyaMCU sends values as integers, so it sends, for example, 215 for 21.5C temperature, and we store it internally as 215 and only convert to float for display.
 
 | CodeName        | Description  | Screenshot  |
 | ------------- |:-------------:| -----:|
 | Toggle | Simple on/off Toggle | TODO |
 | LowMidHigh | 3 options - Low (0), Mid (1), High (2). Used for TuyaMCU Fan Controller. | TODO |
 | OffLowMidHigh | 4 options - Off(0), Low (1), Mid (2), High (3). Used for TuyaMCU Fan Controller. | TODO |
+| OffLowestLowMidHighHighest | 6 options. Used for TuyaMCU Fan Controller. | TODO |
+| LowestLowMidHighHighest | 5 options. Used for TuyaMCU Fan Controller. | TODO |
 | Dimmer | Display slider for TuyaMCU dimmer. | TODO |
 | TextField | Display textfield so you can enter any number. Used for testing, can be also used for time countdown on TuyaMCU devices. | TODO |
 | ReadOnly | Display a read only value on web panel. | TODO |
 | Temperature | Display a text value with 'C suffix, I am using it with I2C TC74 temperature sensor | TODO |
 | temperature_div10 | First divide given value by 10, then display result value with 'C suffix. This is for TuyaMCU LCD/Clock/Calendar/Temperature Sensor/Humidity meter | TODO |
+| OpenClosed | Read only value, displays "Open" if 0 and "Closed" if 1. | TODO |
+| OpenClosed_Inv | Read only value, displays "Open" if 1 and "Closed" if 0. | TODO |
 | humidity | Display value as a % humidity. | TODO |
+| humidity_div10 | Divide by 10 and display value as a % humidity. | TODO |
+| Frequency_div100 | Divide by 100 and display value as a Hz frequency. | TODO |
+| Voltage_div100 | Divide by 100 and display value as a V voltage. | TODO |
+| Power | Power in W. | TODO |
+| Voltage_div10 | Divide by 10 and display value as a V voltage. | TODO |
+| Current_div100 | Divide by 100 and display value as a A current. | TODO |
+| Current_div1000 | Divide by 1000 and display value as a A current. | TODO |
+| OffDimBright | 3 options - Off (0), Dim (1), Bright (2). Used for TuyaMCU LED indicator. | TODO |
   
 # Simple TCP command server for scripting
   

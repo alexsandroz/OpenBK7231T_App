@@ -2,55 +2,98 @@
 #include "../new_pins.h"
 #include "../new_cfg.h"
 #include "../logging/logging.h"
+#include "../driver/drv_local.h"
 #include "drv_i2c_local.h"
 #include "drv_i2c_public.h"
 // Commands register, execution API and cmd tokenizer
 #include "../cmnds/cmd_public.h"
+#include "../hal/hal_pins.h"
+
+
 
 
 #if PLATFORM_BK7231T
 
 #include "i2c_pub.h"
-I2C_OP_ST i2c_operater;
-DD_HANDLE i2c_hdl;
+static I2C_OP_ST i2c_operater;
+static DD_HANDLE i2c_hdl;
+
+#endif
+
+static int current_bus;
+static int tg_addr;
 
 void DRV_I2C_Write(byte addr, byte data)
 {
-	char buff = (char)data;
-
+	if (current_bus == I2C_BUS_SOFT) {
+		Soft_I2C_Start((tg_addr << 1) + 0);
+		Soft_I2C_WriteByte(addr);
+		Soft_I2C_Stop();
+		Soft_I2C_Start((tg_addr << 1) + 0);
+		Soft_I2C_WriteByte(data);
+		Soft_I2C_Stop();
+		return;
+	}
+#if PLATFORM_BK7231T
     i2c_operater.op_addr = addr;
-    ddev_write(i2c_hdl, &buff, 1, (UINT32)&i2c_operater);
+    ddev_write(i2c_hdl, (char*)&data, 1, (UINT32)&i2c_operater);
+#endif
 }
 void DRV_I2C_WriteBytes(byte addr, byte *data, int len) {
-
-
+	if (current_bus == I2C_BUS_SOFT) {
+		Soft_I2C_Start((tg_addr << 1) +0);
+		Soft_I2C_WriteByte(addr);
+		Soft_I2C_Stop();
+		Soft_I2C_Start((tg_addr << 1) + 0);
+		for (int i = 0; i < len; i++) {
+			Soft_I2C_WriteByte(data[i]);
+		}
+		Soft_I2C_Stop();
+		return;
+	}
+#if PLATFORM_BK7231T
     i2c_operater.op_addr = addr;
     ddev_write(i2c_hdl, (char*)data, len, (UINT32)&i2c_operater);
+#endif
 }
-//void DRV_I2C_WriteSingle(byte addr)
-//{
-//	char data;
-//	char buff = (char)data;
-//
-//    i2c_operater.op_addr = addr;
-//    ddev_write(i2c_hdl, &buff, 0, (UINT32)&i2c_operater);
-//}
-
-
 void DRV_I2C_Read(byte addr, byte *data)
 {
+	if (current_bus == I2C_BUS_SOFT) {
+		Soft_I2C_Start((tg_addr << 1) + 0);
+		Soft_I2C_WriteByte(addr);
+		Soft_I2C_Stop();
+		Soft_I2C_Start((tg_addr << 1) + 1);
+		*data = Soft_I2C_ReadByte(false);
+		Soft_I2C_Stop();
+		return;
+	}
+#if PLATFORM_BK7231T
     i2c_operater.op_addr = addr;
     ddev_read(i2c_hdl, (char*)data, 1, (UINT32)&i2c_operater);
+#endif
 }
 int DRV_I2C_Begin(int dev_adr, int busID) {
 
+#if PLATFORM_BK7231T
     UINT32 status;
 	UINT32 oflag;
     oflag = I2C_DEF_DIV;
+#endif
 
-	if(busID == I2C_BUS_I2C1) {
+	current_bus = busID;
+	tg_addr = dev_adr;
+
+	if (busID == I2C_BUS_SOFT) {
+		g_i2c_pin_clk = PIN_FindPinIndexForRole(IOR_SOFT_SCL, g_i2c_pin_clk);
+		g_i2c_pin_data = PIN_FindPinIndexForRole(IOR_SOFT_SDA, g_i2c_pin_data);
+		Soft_I2C_PreInit();
+		return 0;
+	}
+#if PLATFORM_BK7231T
+	else if(busID == I2C_BUS_I2C1) {
 		i2c_hdl = ddev_open("i2c1", &status, oflag);
-	} else if(busID == I2C_BUS_I2C2) {
+	}
+	else if (busID == I2C_BUS_I2C2) {
 		i2c_hdl = ddev_open("i2c2", &status, oflag);
 	} else {
 		addLogAdv(LOG_INFO, LOG_FEATURE_I2C,"DRV_I2C_Begin bus type %i not supported!\n",busID);
@@ -65,32 +108,19 @@ int DRV_I2C_Begin(int dev_adr, int busID) {
     i2c_operater.salve_id = dev_adr;
 
 	return 0;
-}
-void DRV_I2C_Close() {
-
-	ddev_close(i2c_hdl);
-}
 #else
-
-void DRV_I2C_Write(byte addr, byte data)
-{
-}
-void DRV_I2C_WriteBytes(byte addr, byte *data, int len) {
-
-}
-
-void DRV_I2C_Read(byte addr, byte *data)
-{
-}
-int DRV_I2C_Begin(int dev_adr, int busID) {
-
-	return 1; // error
+	return 1;
+#endif
 }
 void DRV_I2C_Close() {
+	if (current_bus == I2C_BUS_SOFT) {
 
-}
+		return;
+	}
+#if PLATFORM_BK7231T
+	ddev_close(i2c_hdl);
 #endif
-
+}
 
 i2cDevice_t *g_i2c_devices = 0;
 
@@ -99,6 +129,8 @@ i2cBusType_t DRV_I2C_ParseBusType(const char *s) {
 		return I2C_BUS_I2C1;
 	if(!stricmp(s,"I2C2"))
 		return I2C_BUS_I2C2;
+	if (!stricmp(s, "Soft"))
+		return I2C_BUS_SOFT;
 	return I2C_BUS_ERROR;
 }
 void DRV_I2C_AddNextDevice(i2cDevice_t *t) {
@@ -169,7 +201,7 @@ void DRV_I2C_AddDevice_TC74_Internal(int busType,int address, int targetChannel)
 
 	DRV_I2C_AddNextDevice((i2cDevice_t*)dev);
 }
-int DRV_I2C_AddDevice_TC74(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t DRV_I2C_AddDevice_TC74(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	const char *i2cModuleStr;
 	int address;
 	int targetChannel;
@@ -184,16 +216,16 @@ int DRV_I2C_AddDevice_TC74(const void *context, const char *cmd, const char *arg
 
 	if(DRV_I2C_FindDevice(busType,address)) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_I2C,"DRV_I2C_AddDevice_TC74: there is already some device on this bus with such addr\n");
-		return 1;
+		return CMD_RES_BAD_ARGUMENT;
 	}
 
 	addLogAdv(LOG_INFO, LOG_FEATURE_I2C,"DRV_I2C_AddDevice_TC74: module %s, address %i, target %i\n", i2cModuleStr, address, targetChannel);
 
 	DRV_I2C_AddDevice_TC74_Internal(busType,address,targetChannel);
 
-	return 1;
+	return CMD_RES_OK;
 }
-int DRV_I2C_AddDevice_MCP23017(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t DRV_I2C_AddDevice_MCP23017(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	const char *i2cModuleStr;
 	int address;
 	i2cBusType_t busType;
@@ -206,18 +238,18 @@ int DRV_I2C_AddDevice_MCP23017(const void *context, const char *cmd, const char 
 
 	if(DRV_I2C_FindDevice(busType,address)) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_I2C,"DRV_I2C_AddDevice_MCP23017: there is already some device on this bus with such addr\n");
-		return 1;
+		return CMD_RES_BAD_ARGUMENT;
 	}
 	addLogAdv(LOG_INFO, LOG_FEATURE_I2C,"DRV_I2C_AddDevice_MCP23017: module %s, address %i\n", i2cModuleStr, address);
 
 
 	DRV_I2C_AddDevice_MCP23017_Internal(busType,address);
 
-	return 1;
+	return CMD_RES_OK;
 }
 
 //
-int DRV_I2C_AddDevice_PCF8574(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t DRV_I2C_AddDevice_PCF8574(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	const char *i2cModuleStr;
 	int address;
 	i2cBusType_t busType;
@@ -231,7 +263,7 @@ int DRV_I2C_AddDevice_PCF8574(const void *context, const char *cmd, const char *
 
 	if(DRV_I2C_FindDevice(busType,address)) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_I2C,"DRV_I2C_AddDevice_PCF8574: there is already some device on this bus with such addr\n");
-		return 1;
+		return CMD_RES_BAD_ARGUMENT;
 	}
 	addLogAdv(LOG_INFO, LOG_FEATURE_I2C,"DRV_I2C_AddDevice_PCF8574: module %s, address %i\n", i2cModuleStr, address);
 
@@ -242,10 +274,10 @@ int DRV_I2C_AddDevice_PCF8574(const void *context, const char *cmd, const char *
 
 	DRV_I2C_AddDevice_PCF8574_Internal(busType,address,lcd_cols,lcd_rows,charsize);
 
-	return 1;
+	return CMD_RES_OK;
 }
 
-int DRV_I2C_AddDevice_LCM1602(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t DRV_I2C_AddDevice_LCM1602(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	const char *i2cModuleStr;
 	int address;
 	i2cBusType_t busType;
@@ -258,14 +290,20 @@ int DRV_I2C_AddDevice_LCM1602(const void *context, const char *cmd, const char *
 
 	if(DRV_I2C_FindDevice(busType,address)) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_I2C,"DRV_I2C_AddDevice_LCM1602: there is already some device on this bus with such addr\n");
-		return 1;
+		return CMD_RES_BAD_ARGUMENT;
 	}
 	addLogAdv(LOG_INFO, LOG_FEATURE_I2C,"DRV_I2C_AddDevice_LCM1602: module %s, address %i\n", i2cModuleStr, address);
 
 	// DRV_I2C_AddDevice_LCM1602_Internal(busType,address);
 
-	return 1;
+	return CMD_RES_OK;
 }
+
+commandResult_t DRV_I2C_Scan(const void *context, const char *cmd, const char *args, int cmdFlags) {
+
+	return CMD_RES_OK;
+}
+
 //
 //	TC74 - I2C temperature sensor - read only single integer value, temperature in C
 //
@@ -290,12 +328,36 @@ int DRV_I2C_AddDevice_LCM1602(const void *context, const char *cmd, const char *
 
 void DRV_I2C_Init()
 {
-	CMD_RegisterCommand("addI2CDevice_TC74","",DRV_I2C_AddDevice_TC74, "Adds a new I2C device", NULL);
-	CMD_RegisterCommand("addI2CDevice_MCP23017","",DRV_I2C_AddDevice_MCP23017, "Adds a new I2C device", NULL);
-	CMD_RegisterCommand("addI2CDevice_LCM1602","",DRV_I2C_AddDevice_LCM1602, "Adds a new I2C device", NULL);
-	CMD_RegisterCommand("addI2CDevice_LCD_PCF8574","",DRV_I2C_AddDevice_PCF8574, "Adds a new I2C device", NULL);
-	CMD_RegisterCommand("MCP23017_MapPinToChannel","",DRV_I2C_MCP23017_MapPinToChannel, "Adds a new I2C device", NULL);
-
+	//cmddetail:{"name":"addI2CDevice_TC74","args":"",
+	//cmddetail:"descr":"Adds a new I2C device - TC74",
+	//cmddetail:"fn":"DRV_I2C_AddDevice_TC74","file":"i2c/drv_i2c_main.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("addI2CDevice_TC74", DRV_I2C_AddDevice_TC74, NULL);
+	//cmddetail:{"name":"addI2CDevice_MCP23017","args":"",
+	//cmddetail:"descr":"Adds a new I2C device - MCP23017",
+	//cmddetail:"fn":"DRV_I2C_AddDevice_MCP23017","file":"i2c/drv_i2c_main.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("addI2CDevice_MCP23017", DRV_I2C_AddDevice_MCP23017, NULL);
+	//cmddetail:{"name":"addI2CDevice_LCM1602","args":"",
+	//cmddetail:"descr":"Adds a new I2C device - LCM1602",
+	//cmddetail:"fn":"DRV_I2C_AddDevice_LCM1602","file":"i2c/drv_i2c_main.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("addI2CDevice_LCM1602", DRV_I2C_AddDevice_LCM1602, NULL);
+	//cmddetail:{"name":"addI2CDevice_LCD_PCF8574","args":"",
+	//cmddetail:"descr":"Adds a new I2C device - PCF8574",
+	//cmddetail:"fn":"DRV_I2C_AddDevice_PCF8574","file":"i2c/drv_i2c_main.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("addI2CDevice_LCD_PCF8574", DRV_I2C_AddDevice_PCF8574, NULL);
+	//cmddetail:{"name":"MCP23017_MapPinToChannel","args":"",
+	//cmddetail:"descr":"Maps port expander bit to OBK channel",
+	//cmddetail:"fn":"DRV_I2C_MCP23017_MapPinToChannel","file":"i2c/drv_i2c_main.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("MCP23017_MapPinToChannel", DRV_I2C_MCP23017_MapPinToChannel, NULL);
+	//cmddetail:{"name":"scanI2C","args":"",
+	//cmddetail:"descr":"",
+	//cmddetail:"fn":"DRV_I2C_MCP23017_MapPinToChannel","file":"i2c/drv_i2c_main.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("scanI2C", DRV_I2C_Scan, NULL);
 }
 void DRC_I2C_RunDevice(i2cDevice_t *dev)
 {

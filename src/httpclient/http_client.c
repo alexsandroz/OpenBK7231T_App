@@ -7,6 +7,7 @@
  */
 
 #include "../new_common.h"
+#include "../cmnds/cmd_public.h"
 #include "include.h"
 #include "utils_timer.h"
 //#include "lite-log.h"
@@ -1167,12 +1168,18 @@ int HTTPClient_Async_SendGet(const char *url_in){
 	httpclient_data_t *client_data;
 	char *url;
 
+	// TEST
+	//url_in = "http://192.168.0.104/cm?cmnd=POWER%20TOGGLE";
+
 	// it must be copied, but we can free it automatically later
 #if DBG_HTTPCLIENT_MEMLEAK
 	strcpy(tmp,url_in);
 	url = tmp;
 #else
-	url = strdup(url_in);
+	// OBK UPDATE: use our own strdup which expands constants
+	// So $CH5 gets changed to channel value integer, etc...
+	url = CMD_ExpandingStrdup(url_in);
+	//url = strdup(url_in);
 #endif
 	if(url==0) {
 		ADDLOG_ERROR(LOG_FEATURE_HTTP_CLIENT, "HTTPClient_Async_SendGet for %s, failed to alloc URL memory\r\n");

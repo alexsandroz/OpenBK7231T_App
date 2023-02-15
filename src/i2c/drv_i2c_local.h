@@ -1,6 +1,8 @@
 #ifndef __DRV_I2C_LOCAL_H__
 #define __DRV_I2C_LOCAL_H__
 
+#include "../cmnds/cmd_public.h"
+
 enum i2cDeviceType_e {
 	I2CDEV_UNKNOWN,
 	I2CDEV_TC74,
@@ -12,7 +14,7 @@ typedef enum i2cBusType_e {
 	I2C_BUS_ERROR,
 	I2C_BUS_I2C1,
 	I2C_BUS_I2C2,
-
+	I2C_BUS_SOFT,
 } i2cBusType_t;
 
 typedef struct i2cDevice_s {
@@ -81,7 +83,7 @@ i2cDevice_t *DRV_I2C_FindDeviceExt(int busType,int address, int devType);
 
 // drv_i2c_mcp23017.c
 void DRV_I2C_MCP23017_RunDevice(i2cDevice_t *dev);
-int DRV_I2C_MCP23017_MapPinToChannel(const void *context, const char *cmd, const char *args, int cmdFlags);
+commandResult_t DRV_I2C_MCP23017_MapPinToChannel(const void *context, const char *cmd, const char *args, int cmdFlags);
 void DRV_I2C_MCP23017_OnChannelChanged(i2cDevice_t *dev, int channel, int iVal);
 
 // drv_i2c_tc74.c

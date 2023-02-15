@@ -6,22 +6,34 @@ void DRV_DGR_Dump(byte *message, int len);
 
 int DGR_BeginWriting(bitMessage_t *msg, const char *groupName, unsigned short sequence, unsigned short flags) {
 	if(MSG_WriteBytes(msg,TASMOTA_DEVICEGROUPS_HEADER,strlen(TASMOTA_DEVICEGROUPS_HEADER))==0) {
-		addLogAdv(LOG_INFO, LOG_FEATURE_DGR,"DGR_BeginWriting: no space for header\n");
+		//
+		// It should not happen, do not waste flash space for warning text...
+		//
+		//addLogAdv(LOG_INFO, LOG_FEATURE_DGR,"DGR_BeginWriting: no space for header\n");
 		return 1;
 	}
 
 	if(MSG_WriteString(msg,groupName) <= 0) {
-		addLogAdv(LOG_INFO, LOG_FEATURE_DGR,"DGR_BeginWriting: no space for group name\n");
+		//
+		// It should not happen, do not waste flash space for warning text...
+		//
+		//addLogAdv(LOG_INFO, LOG_FEATURE_DGR,"DGR_BeginWriting: no space for group name\n");
 		return 1;
 	}
 
 	if(MSG_WriteU16(msg,sequence) <= 0) {
-		addLogAdv(LOG_INFO, LOG_FEATURE_DGR,"DGR_BeginWriting: no space for sequence\n");
+		//
+		// It should not happen, do not waste flash space for warning text...
+		//
+		//addLogAdv(LOG_INFO, LOG_FEATURE_DGR,"DGR_BeginWriting: no space for sequence\n");
 		return 1;
 	}
 
 	if(MSG_WriteU16(msg,flags) <= 0) {
-		addLogAdv(LOG_INFO, LOG_FEATURE_DGR,"DGR_BeginWriting: no space for flags\n");
+		//
+		// It should not happen, do not waste flash space for warning text...
+		//
+		//addLogAdv(LOG_INFO, LOG_FEATURE_DGR,"DGR_BeginWriting: no space for flags\n");
 		return 1;
 	}
 	return 0;
@@ -39,6 +51,11 @@ void DGR_AppendColorRGBCW(bitMessage_t *msg, byte r, byte g, byte b, byte c, byt
 	MSG_WriteByte(msg,b);
 	MSG_WriteByte(msg,c);
 	MSG_WriteByte(msg,w);
+}
+void DGR_AppendFixedColor(bitMessage_t *msg, int colorIndex) {
+	MSG_WriteByte(msg, DGR_ITEM_LIGHT_FIXED_COLOR);
+	// This is a single 8 bit value. No need to put a size byte there.
+	MSG_WriteByte(msg, colorIndex);
 }
 void DGR_AppendDimmer(bitMessage_t *msg, byte dimmValue) {
 	MSG_WriteByte(msg,DGR_ITEM_LIGHT_BRI);
@@ -77,6 +94,16 @@ int DGR_Quick_FormatRGBCW(byte *buffer, int maxSize, const char *groupName, uint
 	DGR_Finish(&msg);
 	return msg.position;
 }
+int DGR_Quick_FormatFixedColor(byte *buffer, int maxSize, const char *groupName, uint16_t sequence, int flags, int color) {
+	bitMessage_t msg;
+	MSG_BeginWriting(&msg, buffer, maxSize);
+	DGR_BeginWriting(&msg, groupName, sequence, flags);
+	DGR_AppendFixedColor(&msg, color);
+	DGR_Finish(&msg);
+	return msg.position;
+}
+
+
 
 
 

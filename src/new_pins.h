@@ -56,11 +56,41 @@ enum IORole {
 	IOR_AlwaysLow,
 
 	IOR_UCS1912_DIN,
+	IOR_SM16703P_DIN,
+
+	IOR_Button_NextTemperature,
+	IOR_Button_NextTemperature_n,
+
+	IOR_Button_ScriptOnly,
+	IOR_Button_ScriptOnly_n,
+
+	IOR_DHT11,
+	IOR_DHT12,
+	IOR_DHT21,
+	IOR_DHT22,
+
+	IOR_CHT8305_DAT,
+	IOR_CHT8305_CLK,
+
+	IOR_SHT3X_DAT,
+	IOR_SHT3X_CLK,
+
+	IOR_SOFT_SDA,
+	IOR_SOFT_SCL,
+
+	IOR_SM2235_DAT,
+	IOR_SM2235_CLK,
+
+    IOR_BridgeForward,
+    IOR_BridgeReverse,
 
 	IOR_Total_Options,
 };
 
-enum ChannelType {
+#define IS_PIN_DHT_ROLE(role) (((role)>=IOR_DHT11) && ((role)<=IOR_DHT22))
+#define IS_PIN_TEMP_HUM_SENSOR_ROLE(role) (((role)==IOR_SHT3X_DAT) || ((role)==IOR_CHT8305_DAT))
+
+typedef enum {
 	ChType_Default,
 	ChType_Error,
 	ChType_Temperature,
@@ -100,7 +130,12 @@ enum ChannelType {
 	ChType_EnergyToday_kWh_div1000,
 	ChType_Current_div1000,
 	ChType_EnergyTotal_kWh_div100,
-};
+	ChType_OpenClosed,
+	ChType_OpenClosed_Inv,
+	ChType_BatteryLevelPercent,
+	ChType_OffDimBright,
+
+} ChannelType;
 
 
 #if PLATFORM_BL602
@@ -157,9 +192,23 @@ typedef struct pinsState_s {
 #define OBK_FLAG_LED_BROADCAST_FULL_RGBCW			16
 #define OBK_FLAG_LED_AUTOENABLE_ON_WWW_ACTION		17
 #define OBK_FLAG_LED_SMOOTH_TRANSITIONS				18
+#define OBK_FLAG_TUYAMCU_ALWAYSPUBLISHCHANNELS		19
+#define OBK_FLAG_LED_FORCE_MODE_RGB					20
+#define OBK_FLAG_MQTT_RETAIN_POWER_CHANNELS			21
+#define OBK_FLAG_IR_PUBLISH_RECEIVED_IN_JSON		22
+#define OBK_FLAG_LED_AUTOENABLE_ON_ANY_ACTION		23
+#define OBK_FLAG_LED_EMULATE_COOL_WITH_RGB			24
+#define OBK_FLAG_POWER_ALLOW_NEGATIVE				25
+#define OBK_FLAG_USE_SECONDARY_UART					26
+#define OBK_FLAG_AUTOMAIC_HASS_DISCOVERY			27
+#define OBK_FLAG_LED_SETTING_WHITE_RGB_ENABLES_CW	28
+#define OBK_FLAG_USE_SHORT_DEVICE_NAME_AS_HOSTNAME	29
+#define OBK_FLAG_DO_TASMOTA_TELE_PUBLISHES			30
+#define OBK_FLAG_CMD_ACCEPT_UART_COMMANDS			31
+#define OBK_FLAG_LED_USE_OLD_LINEAR_MODE			32
+#define OBK_FLAG_PUBLISH_MULTIPLIED_VALUES			33
 
-
-#define OBK_TOTAL_FLAGS 19
+#define OBK_TOTAL_FLAGS 34
 
 
 #define CGF_MQTT_CLIENT_ID_SIZE			64
@@ -188,6 +237,36 @@ enum {
 	CFG_OBK_POWER_MAX
 };
 
+typedef struct led_corr_s { // LED gamma correction and calibration data block
+	float rgb_cal[3];     // RGB correction factors, range 0.0-1.0, 1.0 = no correction
+	float led_gamma;      // LED gamma value, range 1.0-3.0
+	float rgb_bright_min; // RGB minimum brightness, range 0.0-10.0%
+	float cw_bright_min;  // CW minimum brightness, range 0.0-10.0%
+} led_corr_t;
+
+#define MAGIC_LED_CORR_SIZE		24
+
+typedef struct ledRemap_s {
+	//unsigned short r : 3;
+	//unsigned short g : 3;
+	//unsigned short b : 3;
+	//unsigned short c : 3;
+	//unsigned short w : 3;
+	// I want to be able to easily access indices with []
+	union {
+		struct {
+			byte r;
+			byte g;
+			byte b;
+			byte c;
+			byte w;
+		};
+		byte ar[5];
+	};
+} ledRemap_t;
+
+#define MAGIC_LED_REMAP_SIZE 5
+
 //
 // Main config structure (less than 2KB)
 //
@@ -204,7 +283,6 @@ typedef struct mainConfig_s {
 	// 0x4
 	int version;
 	int genericFlags;
-	// unused
 	int genericFlags2;
 	unsigned short changeCounter;
 	unsigned short otaCounter;
@@ -252,8 +330,14 @@ typedef struct mainConfig_s {
 	byte buttonHoldRepeat;
 	byte unused_fill1;
 
+	// offset 0x000004BC
 	unsigned long LFS_Size; // szie of LFS volume.  it's aligned against the end of OTA
-	unsigned long unusedSectorA[53];
+	byte unusedSectorAB[119];
+	ledRemap_t ledRemap;
+	led_corr_t led_corr;
+	// alternate topic name for receiving MQTT commands
+	// offset 0x00000554
+	char mqtt_group[64];
 	// offs 0x00000594
 	byte unused_bytefill[3];
 	byte timeRequiredToMarkBootSuccessfull;
@@ -263,8 +347,8 @@ typedef struct mainConfig_s {
 	// 0x000005A0
 	char ping_host[64];
 	char initCommandLine[512];
-} mainConfig_t; // size 0x000007E0
-
+} mainConfig_t; // size 0x000007E0 (2016 decimal)
+#define MAGIC_CONFIG_SIZE		2016
 extern mainConfig_t g_cfg;
 
 extern char g_enable_pins;
@@ -273,9 +357,12 @@ extern char g_enable_pins;
 #define CHANNEL_SET_FLAG_SKIP_MQTT	2
 #define CHANNEL_SET_FLAG_SILENT		4
 
+void PIN_ticks(void *param);
+
+void PIN_set_wifi_led(int value);
 void PIN_AddCommands(void);
+void PINS_BeginDeepSleepWithPinWakeUp();
 void PIN_SetupPins();
-void PIN_StartButtonScanThread(void);
 void PIN_OnReboot();
 void CFG_ClearPins();
 int PIN_CountPinsWithRole(int role);
@@ -295,10 +382,14 @@ void PIN_SetGenericDoubleClickCallback(void (*cb)(int pinIndex));
 void CHANNEL_ClearAllChannels();
 // CHANNEL_SET_FLAG_*
 void CHANNEL_Set(int ch, int iVal, int iFlags);
+void CHANNEL_Set_FloatPWM(int ch, float fVal, int iFlags);
 void CHANNEL_Add(int ch, int iVal);
-void CHANNEL_AddClamped(int ch, int iVal, int min, int max);
+void CHANNEL_AddClamped(int ch, int iVal, int min, int max, int bWrapInsteadOfClamp);
 int CHANNEL_Get(int ch);
+float CHANNEL_GetFloat(int ch);
 int CHANNEL_GetRoleForOutputChannel(int ch);
+bool CHANNEL_HasRoleThatShouldBePublished(int ch);
+bool CHANNEL_IsPowerRelayChannel(int ch);
 // See: enum ChannelType
 void CHANNEL_SetType(int ch, int type);
 int CHANNEL_GetType(int ch);
@@ -310,16 +401,21 @@ int CHANNEL_HasChannelPinWithRole(int ch, int iorType);
 int CHANNEL_HasChannelPinWithRoleOrRole(int ch, int iorType, int iorType2);
 bool CHANNEL_IsInUse(int ch);
 void Channel_SaveInFlashIfNeeded(int ch);
-bool CHANNEL_HasChannelSomeOutputPin(int ch);
 int CHANNEL_FindMaxValueForChannel(int ch);
+// cmd_channels.c
+const char *CHANNEL_GetLabel(int ch);
+//ledRemap_t *CFG_GetLEDRemap();
 
+void get_Relay_PWM_Count(int* relayCount, int* pwmCount, int* dInputCount);
 int h_isChannelPWM(int tg_ch);
 int h_isChannelRelay(int tg_ch);
+int h_isChannelDigitalInput(int tg_ch);
 
 
 //int PIN_GetPWMIndexForPinIndex(int pin);
 
 int PIN_ParsePinRoleName(const char* name);
+const char *PIN_RoleToString(int role);
 
 // from new_builtin.c
 /*

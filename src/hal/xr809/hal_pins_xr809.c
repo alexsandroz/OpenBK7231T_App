@@ -118,7 +118,7 @@ void HAL_PIN_PWM_Stop(int pinIndex) {
 void HAL_PIN_PWM_Start(int index) {
 
 }
-void HAL_PIN_PWM_Update(int index, int value) {
+void HAL_PIN_PWM_Update(int index, float value) {
 
 	if(value<0)
 		value = 0;
@@ -126,7 +126,12 @@ void HAL_PIN_PWM_Update(int index, int value) {
 		value = 100;
 }
 
-
+unsigned int HAL_GetGPIOPin(int index) {
+	int xr_port;
+	int xr_pin;
+	PIN_XR809_GetPortPinForIndex(index, &xr_port, &xr_pin);
+	return xr_pin;
+}
 
 #endif
 

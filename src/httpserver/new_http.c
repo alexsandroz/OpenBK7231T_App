@@ -17,10 +17,11 @@
 const char httpHeader[] = "HTTP/1.1 %d OK\nContent-type: %s";  // HTTP header
 const char httpMimeTypeHTML[] = "text/html";              // HTML MIME type
 const char httpMimeTypeText[] = "text/plain";           // TEXT MIME type
+const char httpMimeTypeXML[] = "text/xml";           // TEXT MIME type
 const char httpMimeTypeJson[] = "application/json";           // TEXT MIME type
 const char httpMimeTypeBinary[] = "application/octet-stream";   // binary/file MIME type
 
-const char htmlShortcutIcon[] = "<link rel='shortcut icon' href='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsIAAA7CARUoSoAAAAHESURBVDhPpZPLS1VhFMV/pyuFb1HIHhDcixGU/glpNKg7ihLCMnOUQQ/6K5LmIg0ciQMRFMeZIMmlbFxEFIaYUCGIUQoRer7Wut/B8BVFC9Y5++y9Nuxvffsk7I9asVcM4oi4Jv4TStdaCF2i4tmY+jNaxZfiotjfXEWa3iWYzZWkzmU1a6zdhbmhc6Tvu0lPNRCqKwibdyKrFDvnmjXSvogtcCB7G0faj8HJBpLxi7ChwRe+RW4qnlDONWuEo+WnkMvexuHpJdo7JGhrgjONhOdf4O0q3D4NHcdJXq9A5xOSlR88ln4mtkW3Sz6nxz6UI0wWSfP1hGJfpGPnXLMm86TkXl/jPbk9OHpB9+Wxv8PkB8JMK8mDIVWFgT44/4bQWSDJ10Giru6nMDbPfXvgvt/Y9rE/Mln5VSPOeiy7vXUEuV68tfsI1mRH8G7U2MSf4vD6BgcLdZydvhQNO1FNqF+C/DJcb4ErGv9yAaY+ahnWeKSem1nvFhZ9z0GL86orTjLfI96IsXOuWWNtbNm+B5+ffYJ3XwlXp6BCRuV1PzYtp9g516yxtvzcAa+nN2xB3GuVH2a1OXHPVd6Jv/qZ/vN3hl/Pmb41kmFXMgAAAABJRU5ErkJggg==' />";
+const char htmlShortcutIcon[] = "<link rel='shortcut icon' href='data:image/gif;base64,R0lGODlhEAAQALMAABEHBLT+BJxCBFgmBHx6fKxKBCQiJCIWC/ppBJSWlNTS1Pv9+0xmBDo7Oow6BNlZBCH5BAEAAAsALAAAAAAQABAAAwRzcMm5UqKYtjFalkpjEACCAITRKJrwHOV5PII3GQ/yAM+ePwYKYYYoOBwF3YEwaQCehQODcSg8AZ7EwPRwMAIBhiOHGFi2Oi9YTDYvnFAp1fq0LYY5I1LJvP14PjpBTS4wJgAzNRQhIzEoKiwfGx0fGRYfEQA7' />";
 
 const char htmlDoctype[] =
 "<!DOCTYPE html><html>";
@@ -48,6 +49,8 @@ const char htmlFooterInfo[] =
 "viewtopic.php?p=19841301#19841301\">Read more</a> | "
 "<a target=\"_blank\" "
 "href=\"https://openbekeniot.github.io/webapp/devicesList.html\">Devices List</a> | "
+"<a target=\"_blank\" "
+"href=\"https://github.com/openshwprojects/OpenBK7231T_App/blob/main/docs/commands.md\">Commands</a> | "
 "<a target=\"_blank\" "
 "href=\"https://paypal.me/openshwprojects\">Support project</a><br>";
 
@@ -81,11 +84,21 @@ static http_callback_t* callbacks[MAX_HTTP_CALLBACKS];
 static int numCallbacks = 0;
 
 int HTTP_RegisterCallback(const char* url, int method, http_callback_fn callback) {
+	int i;
+
 	if (!url || !callback) {
 		return -1;
 	}
 	if (numCallbacks >= MAX_HTTP_CALLBACKS) {
 		return -4;
+	}
+	for (i = 0; i < MAX_HTTP_CALLBACKS; i++) {
+		if (callbacks[i]) {
+			if (callbacks[i]->callback == callback && !strcmp(callbacks[i]->url, url)
+				&& callbacks[i]->method == method) {
+				return i;
+			}
+		}
 	}
 	callbacks[numCallbacks] = (http_callback_t*)os_malloc(sizeof(http_callback_t));
 	if (!callbacks[numCallbacks]) {
@@ -219,9 +232,9 @@ void http_setup(http_request_t* request, const char* type) {
 	poststr(request, "Accept-Ranges: none");
 	poststr(request, "\r\n");
 	poststr(request, "Transfer-Encoding: chunked");
+#endif
 	poststr(request, "\r\n");
 	poststr(request, "Connection: close");
-#endif
 	poststr(request, "\r\n"); // end headers with double CRLF
 	poststr(request, "\r\n");
 }
@@ -277,11 +290,14 @@ const char* http_checkArg(const char* p, const char* n) {
 	return p;
 }
 
-void http_copyCarg(const char* atin, char* to, int maxSize) {
+int http_copyCarg(const char* atin, char* to, int maxSize) {
 	int a, b;
+	int realSize;
 	const unsigned char* at = (unsigned char*)atin;
 
-	while (*at != 0 && *at != '&' && *at != ' ' && maxSize > 1) {
+	realSize = 0;
+
+	while (*at != 0 && *at != '&' && *at != ' ') {
 #if 0
 		* to = *at;
 		to++;
@@ -303,20 +319,36 @@ void http_copyCarg(const char* atin, char* to, int maxSize) {
 				b -= ('A' - 10);
 			else
 				b -= '0';
-			*to++ = 16 * a + b;
+			// can we afford to place this char in the target?
+			if (maxSize > 1) {
+				maxSize--;
+				*to++ = 16 * a + b;
+			}
+			realSize++;
 			at += 3;
 		}
 		else if (*at == '+') {
-			*to++ = ' ';
+			// can we afford to place this char in the target?
+			if (maxSize > 1) {
+				maxSize--;
+				*to++ = ' ';
+			}
+			realSize++;
 			at++;
 		}
 		else {
-			*to++ = *at++;
+			// can we afford to place this char in the target?
+			if (maxSize > 1) {
+				maxSize--;
+				*to++ = *at;
+			}
+			realSize++;
+			at++;
 		}
-		maxSize--;
 #endif
 	}
 	*to = 0;
+	return realSize;
 }
 
 int http_getArg(const char* base, const char* name, char* o, int maxSize) {
@@ -331,8 +363,7 @@ int http_getArg(const char* base, const char* name, char* o, int maxSize) {
 		const char* at = http_checkArg(base, name);
 		if (at) {
 			at++;
-			http_copyCarg(at, o, maxSize);
-			return 1;
+			return http_copyCarg(at, o, maxSize);
 		}
 		while (*base != '&') {
 			if (*base == 0) {
@@ -377,7 +408,7 @@ const char* htmlPinRoleNames[] = {
 	"SM2135CLK",
 	"BP5758D_DAT",
 	"BP5758D_CLK",
-  "BP1658CJ_DAT",
+    "BP1658CJ_DAT",
 	"BP1658CJ_CLK",
 	"PWM_n",
 	"IRRecv",
@@ -389,11 +420,35 @@ const char* htmlPinRoleNames[] = {
 	"AlwaysHigh",
 	"AlwaysLow",
 	"UCS1912_DIN",
+	"SM16703P_DIN",
+	"Btn_NextTemperature",
+	"Btn_NextTemperature_n",
+	"Btn_ScriptOnly",
+	"Btn_ScriptOnly_n",
+	"DHT11",
+	"DHT12",
+	"DHT21",
+	"DHT22",
+	"CHT8305_SDA",
+	"CHT8305_SCK",
+	"SHT3X_SDA",
+	"SHT3X_SCK",
+	"SoftSDA",
+	"SoftSCL",
+	"SM2235DAT",
+	"SM2235CLK",
+    "BridgeFWD",
+    "BridgeREV",
+    "error",
+	"error",
 	"error",
 	"error",
 	"error",
 };
 
+const char *PIN_RoleToString(int role) {
+	return htmlPinRoleNames[role];
+}
 int PIN_ParsePinRoleName(const char* name) {
 	int i;
 
@@ -439,6 +494,10 @@ int postany(http_request_t* request, const char* str, int len) {
 	int addlen = len;
 
 	if (NULL == str) {
+		// fd will be NULL for unit tests where HTTP packet is faked locally
+		if (request->fd == 0) {
+			return request->replylen;
+		}
 		if (request->replylen > 0) {
 			send(request->fd, request->reply, request->replylen, 0);
 		}
@@ -575,7 +634,7 @@ int HTTP_ProcessPacket(http_request_t* request) {
 			p = strchr(headers, '\r');
 			if (p != headers) {
 				if (p) {
-					if (request->numheaders < 16) {
+					if (request->numheaders < MAX_HEADERS) {
 						request->headers[request->numheaders] = headers;
 						request->numheaders++;
 					}
@@ -651,7 +710,6 @@ int HTTP_ProcessPacket(http_request_t* request) {
 	if (http_checkUrlBase(urlStr, "flash_read_tool")) return http_fn_flash_read_tool(request);
 	if (http_checkUrlBase(urlStr, "uart_tool")) return http_fn_uart_tool(request);
 	if (http_checkUrlBase(urlStr, "cmd_tool")) return http_fn_cmd_tool(request);
-	if (http_checkUrlBase(urlStr, "config_dump_table")) return http_fn_config_dump_table(request);
 	if (http_checkUrlBase(urlStr, "startup_command")) return http_fn_startup_command(request);
 	if (http_checkUrlBase(urlStr, "cfg_generic")) return http_fn_cfg_generic(request);
 	if (http_checkUrlBase(urlStr, "cfg_startup")) return http_fn_cfg_startup(request);
@@ -682,11 +740,11 @@ See https://github.com/openshwprojects/OpenBK7231T_App/blob/main/BUILDING.md for
 */
 
 //region_start htmlHeadStyle
-const char htmlHeadStyle[] = "<style>div,fieldset,input,select{padding:5px;font-size:1em;margin:0 0 .2em}fieldset{background:#4f4f4f}p{margin:.5em 0}input{width:100%;box-sizing:border-box;-webkit-box-sizing:border-box;-moz-box-sizing:border-box;background:#ddd;color:#000}form{margin-bottom:.5em}input[type=checkbox],input[type=radio]{width:1em;margin-right:6px;vertical-align:-1px}input[type=range]{width:99%}select{width:100%;background:#ddd;color:#000}textarea{resize:vertical;width:98%;height:318px;padding:5px;overflow:auto;background:#1f1f1f;color:#65c115}body{text-align:center;font-family:verdana,sans-serif}body,h1 a{background:#21333e;color:#eaeaea}td{padding:0}button,input[type=submit]{border:0;border-radius:.3rem;background:#1fa3ec;color:#faffff;line-height:2.4rem;font-size:1.2rem;cursor:pointer}input[type=submit]{width:100%;transition-duration:.4s}input[type=submit]:hover{background:#0e70a4}.bred{background:#d43535!important}.bred:hover{background:#931f1f!important}.bgrn{background:#47c266!important}.bgrn:hover{background:#5aaf6f!important}a{color:#1fa3ec;text-decoration:none}.p{float:left;text-align:left}.q{float:right;text-align:right}.r{border-radius:.3em;padding:2px;margin:6px 2px}.hf{display:none}.hdiv{width:95%;white-space:nowrap}.hele{width:210px;display:inline-block;margin-left:2px}div#state{padding:0}div#changed{padding:0;height:23px}div#main{text-align:left;display:inline-block;color:#eaeaea;min-width:340px;max-width:800px}table{table-layout:fixed}</style>";
+const char htmlHeadStyle[] = "<style>div,fieldset,input,select{padding:5px;font-size:1em;margin:0 0 .2em}fieldset{background:#4f4f4f}p{margin:.5em 0}input{width:100%;box-sizing:border-box;-webkit-box-sizing:border-box;-moz-box-sizing:border-box;background:#ddd;color:#000}form{margin-bottom:.5em}input[type=checkbox],input[type=radio]{width:1em;margin-right:6px;vertical-align:-1px}input[type=range]{width:99%}select{width:100%;background:#ddd;color:#000}textarea{resize:vertical;width:98%;height:318px;padding:5px;overflow:auto;background:#1f1f1f;color:#65c115}body{text-align:center;font-family:verdana,sans-serif}body,h1 a{background:#21333e;color:#eaeaea}td{padding:0}button,input[type=submit]{border:0;border-radius:.3rem;background:#1fa3ec;color:#faffff;line-height:2.4rem;font-size:1.2rem;cursor:pointer}input[type=submit]{width:100%;transition-duration:.4s}input[type=submit]:hover{background:#0e70a4}.bred{background:#d43535!important}.bred:hover{background:#931f1f!important}.bgrn{background:#47c266!important}.bgrn:hover{background:#5aaf6f!important}a{color:#1fa3ec;text-decoration:none}.p{float:left;text-align:left}.q{float:right;text-align:right}.r{border-radius:.3em;padding:2px;margin:6px 2px;background:linear-gradient(90deg,#ffa000,#a6d1ff)}.hf{display:none}.hdiv{width:95%;white-space:nowrap}.hele{width:210px;display:inline-block;margin-left:2px}div#state{padding:0}div#changed{padding:0;height:23px}div#main{text-align:left;display:inline-block;color:#eaeaea;min-width:340px;max-width:800px}table{table-layout:fixed;width:100%}.disp-none{display:none}.disp-inline{display:inline-block}.safe{color:red}form.indent{padding-left:16px}li{margin:5px 0}.off,.on{text-align:center;font-size:54px}.on{font-weight:700}</style>";
 //region_end htmlHeadStyle
 
 //region_start pageScript
-const char pageScript[] = "<script type='text/javascript'>var firstTime,lastTime,onlineFor,req=null,onlineForEl=null,getElement=e=>document.getElementById(e);function showState(){clearTimeout(firstTime),clearTimeout(lastTime),null!=req&&req.abort(),(req=new XMLHttpRequest).onreadystatechange=()=>{var e;4==req.readyState&&200==req.status&&((\"INPUT\"!=document.activeElement.tagName||\"number\"!=document.activeElement.type&&\"color\"!=document.activeElement.type)&&(e=getElement(\"state\"))&&(e.innerHTML=req.responseText),clearTimeout(firstTime),clearTimeout(lastTime),lastTime=setTimeout(showState,3e3))},req.open(\"GET\",\"index?state=1\",!0),req.send(),firstTime=setTimeout(showState,3e3)}function fmtUpTime(e){var t,n,o=Math.floor(e/86400);return e%=86400,t=Math.floor(e/3600),e%=3600,n=Math.floor(e/60),e=e%60,0<o?o+` days, ${t} hours, ${n} minutes and ${e} seconds`:0<t?t+` hours, ${n} minutes and ${e} seconds`:0<n?n+` minutes and ${e} seconds`:`just ${e} seconds`}function updateOnlineFor(){onlineForEl.textContent=fmtUpTime(++onlineFor)}function onLoad(){(onlineForEl=getElement(\"onlineFor\"))&&(onlineFor=parseInt(onlineForEl.dataset.initial,10))&&setInterval(updateOnlineFor,1e3),showState()}function submitTemperature(e){var t=getElement(\"form132\");getElement(\"kelvin132\").value=Math.round(1e6/parseInt(e.value)),t.submit()}window.addEventListener(\"load\",onLoad),history.pushState(null,\"\",\"index\"),setTimeout(()=>{var e=getElement(\"changed\");e&&(e.innerHTML=\"\")},5e3);</script>";
+const char pageScript[] = "<script type='text/javascript'>var firstTime,lastTime,onlineFor,req=null,onlineForEl=null,getElement=e=>document.getElementById(e);function showState(){clearTimeout(firstTime),clearTimeout(lastTime),null!=req&&req.abort(),(req=new XMLHttpRequest).onreadystatechange=()=>{var e;4==req.readyState&&\"OK\"==req.statusText&&((\"INPUT\"!=document.activeElement.tagName||\"number\"!=document.activeElement.type&&\"color\"!=document.activeElement.type)&&(e=getElement(\"state\"))&&(e.innerHTML=req.responseText),clearTimeout(firstTime),clearTimeout(lastTime),lastTime=setTimeout(showState,3e3))},req.open(\"GET\",\"index?state=1\",!0),req.send(),firstTime=setTimeout(showState,3e3)}function fmtUpTime(e){var t,n,o=Math.floor(e/86400);return e%=86400,t=Math.floor(e/3600),e%=3600,n=Math.floor(e/60),e=e%60,0<o?o+` days, ${t} hours, ${n} minutes and ${e} seconds`:0<t?t+` hours, ${n} minutes and ${e} seconds`:0<n?n+` minutes and ${e} seconds`:`just ${e} seconds`}function updateOnlineFor(){onlineForEl.textContent=fmtUpTime(++onlineFor)}function onLoad(){(onlineForEl=getElement(\"onlineFor\"))&&(onlineFor=parseInt(onlineForEl.dataset.initial,10))&&setInterval(updateOnlineFor,1e3),showState()}function submitTemperature(e){var t=getElement(\"form132\");getElement(\"kelvin132\").value=Math.round(1e6/parseInt(e.value)),t.submit()}window.addEventListener(\"load\",onLoad),history.pushState(null,\"\",window.location.pathname.slice(1)),setTimeout(()=>{var e=getElement(\"changed\");e&&(e.innerHTML=\"\")},5e3);</script>";
 //region_end pageScript
 
 //region_start ha_discovery_script

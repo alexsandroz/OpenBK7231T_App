@@ -9,42 +9,28 @@
 #include <ws2tcpip.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "new_common.h"
+#include "driver\drv_public.h"
+#include "cmnds\cmd_public.h"
+#include "httpserver\new_http.h"
+#include "new_pins.h"
+#include <timeapi.h>
+
+#define OFFSETOF(TYPE, ELEMENT) ((size_t)&(((TYPE *)0)->ELEMENT))
 
 // Need to link with Ws2_32.lib
 #pragma comment (lib, "Ws2_32.lib")
 // #pragma comment (lib, "Mswsock.lib")
+#pragma comment (lib, "Winmm.lib")
 
-#define DEFAULT_BUFLEN 16384
-#define DEFAULT_PORT "80"
+int accum_time = 0;
+int win_frameNum = 0;
+// this time counter is simulated, I need this for unit tests to work
+int g_simulatedTimeNow = 0;
+extern int g_port;
+#define DEFAULT_FRAME_TIME 5
 
-#include "new_common.h"
-#include "httpserver\new_http.h"
-#include "new_pins.h"
 
-//int snprintf(char *buffer, unsigned int len, const char *fmt, ...) {
-//	int rv;
-//   	va_list val;
-//    va_start(val, fmt);
-//    rv = vsnprintf(buffer, len, fmt, val);
-//    va_end(val);
-//    return rv;
-//}
-void CMD_StartTCPCommandLine() {
-
-}
-
-void Main_SetupPingWatchDog(const char *target/*, int delayBetweenPings_Seconds*/) {
-
-}
-void Main_PingWatchDogSilent() {
-
-}
-int PingWatchDog_GetTotalLost() {
-    return 0;
-}
-int PingWatchDog_GetTotalReceived() {
-    return 0;
-}
 void strcat_safe_test(){
 	char tmpA[16];
 	char tmpB[16];
@@ -77,136 +63,266 @@ void strcat_safe_test(){
 	urldecode2_safe(buff,"qqqqqq%40qqqq",sizeof(buff));
 
 
-	//misc_formatUpTimeString(15, timeStrA);
-	//misc_formatUpTimeString(65, timeStrB);
-	//misc_formatUpTimeString(125, timeStrC);
-	//misc_formatUpTimeString(60*60, timeStrD);
-	//misc_formatUpTimeString(4*60*60, timeStrE);
-	//misc_formatUpTimeString(24*60*60, timeStrF);
-	//misc_formatUpTimeString(24*60*60+60*60+50, timeStrG);
-	//misc_formatUpTimeString(100*24*60*60+60*60+15*60+50, timeStrH);
-
-	// some command examples, compatible with Tasmota syntax
-	//CMD_ExecuteCommand("TuyaSend3 108,ff0000646464ff");
-	//CMD_ExecuteCommand("TuyaSend4 103,2");
-	//CMD_ExecuteCommand("TuyaSend5 108, ABCD");
-	//CMD_ExecuteCommand("TuyaSend8");
-	//// TODO
-	////CMD_ExecuteCommand("Backlog Dimmer 10; Dimmer 100 ");
-	////CMD_ExecuteCommand("Backlog Status 1; Power2 on; Delay 20; Power2 off; Status 4");
-	//CMD_ExecuteCommand("Tuyqqqqqqqqqq arg1 arg2 arg3 arg4");
-	//CMD_ExecuteCommand("Tuyqqqqqqqqqq");
-	//CMD_ExecuteCommand("Tuyqqqqqqqqqq");
-	//CMD_ExecuteCommand("Tuyqqqqqqqqqq");
-
 }
 
-// placeholder - TODO
-char myIP[] = "127.0.0.1";
-char *getMyIp(){
-    return myIP;
-}
-void __asm__(const char *s) {
-
-}
-DWORD WINAPI Thread_EverySecond(void* arg)
-{
-	while(1){
-		TuyaMCU_RunFrame();
-		Sleep(1000);
-	}
-    return 0;
-}
-// WINDOWS TEST ONLY - simulate UART receiving bytes, byte after byte
-DWORD WINAPI Thread_SimulateTUYAMCUSendingData(void* arg)
-{
-	int r;
-	const char *p;
-	const char  *packets[] = {
-		"55AA00000000FF",
-		"55AA00000000FF",
-		"55AA0001000000",
-		"55AA0002000001",
-		"55AA002400010024",
-		"55AA001C0008000000000000000023",
-	};
-	int g_numPackets = sizeof(packets)/sizeof(packets[0]);
-	while(1){
-		int ch;
-		ch = rand()%g_numPackets;
-		p = packets[ch];
-		while(*p) {
-			byte b;
-			b = hexbyte(p);
-			UART_AppendByteToCircularBuffer(b);
-			p += 2;
-			Sleep(10);
-		}
-
-		Sleep(1000);
-	}
-    return 0;
-}
-
-//void addLogAdv(int level, int feature, char *fmt, ...){
-//	char t[512];
-//    va_list argList;
-//
-//    va_start(argList, fmt);
-//    vsprintf(t, fmt, argList);
-//    va_end(argList);
-//
-//	printf(t);
-//}
-
-int accum_time = 0;
-int win_frameNum = 0;
-void Sim_RunFrame() {
+void Sim_RunFrame(int frameTime) {
+	//printf("Sim_RunFrame: frametime %i\n", frameTime);
 	win_frameNum++;
-	accum_time += 5;
-	PIN_ticks(0);
+	// this time counter is simulated, I need this for unit tests to work
+	g_simulatedTimeNow += frameTime;
+	accum_time += frameTime;
+	QuickTick(0);
+	WIN_RunMQTTFrame();
 	HTTPServer_RunQuickTick();
 	if (accum_time > 1000) {
-		accum_time = 0;
+		accum_time -= 1000;
 		Main_OnEverySecond();
 	}
 }
-void Sim_RunFrames(int n) {
+void Sim_RunMiliseconds(int ms, bool bApplyRealtimeWait) {
+	while (ms > 0) {
+		if (bApplyRealtimeWait) {
+			Sleep(DEFAULT_FRAME_TIME);
+		}
+		Sim_RunFrame(DEFAULT_FRAME_TIME);
+		ms -= DEFAULT_FRAME_TIME;
+	}
+}
+void Sim_RunSeconds(float f, bool bApplyRealtimeWait) {
+	int ms = f * 1000;
+	Sim_RunMiliseconds(ms, bApplyRealtimeWait);
+}
+void Sim_RunFrames(int n, bool bApplyRealtimeWait) {
 	int i;
 
 	for (i = 0; i < n; i++) {
-		Sim_RunFrame();
+		if (bApplyRealtimeWait) {
+			Sleep(DEFAULT_FRAME_TIME);
+		}
+		Sim_RunFrame(DEFAULT_FRAME_TIME);
 	}
 }
 
-void Win_DoUnitTests() {
-	//CFG_ClearPins();
+bool bObkStarted = false;
+void SIM_Hack_ClearSimulatedPinRoles();
 
+void SIM_ClearOBK() {
+	if (bObkStarted) {
+		DRV_ShutdownAllDrivers();
+		LOG_DeInit();
+		release_lfs();
+		SIM_Hack_ClearSimulatedPinRoles();
+		WIN_ResetMQTT();
+		CMD_ExecuteCommand("clearAll", 0);
+		CMD_ExecuteCommand("led_expoMode", 0);
+		Main_Init();
+	}
+}
+void SIM_DoFreshOBKBoot() {
+	bObkStarted = true;
+	Main_Init();
+}
+void Win_DoUnitTests() {
+	Test_Commands_Generic();
+	Test_Demo_SimpleShuttersScript();
+	Test_Role_ToggleAll();
+	Test_Demo_FanCyclingRelays();
+	Test_Demo_MapFanSpeedToRelays();
+	Test_MapRanges();
+	Test_Demo_ExclusiveRelays();
+	Test_HassDiscovery();
+	Test_MultiplePinsOnChannel();
+	Test_Flags();
+	Test_DHT();
+	Test_EnergyMeter();
+	Test_Tasmota();
+	Test_NTP();
+	Test_MQTT();
+	Test_HTTP_Client();
+	Test_ExpandConstant();
+	Test_ChangeHandlers_MQTT();
+	Test_ChangeHandlers();
+	Test_RepeatingEvents();
+	Test_ButtonEvents();
+	Test_Commands_Alias();
 	Test_Expressions_RunTests_Basic();
 	Test_LEDDriver();
+	Test_LFS();
+	Test_Scripting();
 	Test_Commands_Channels();
+	Test_Command_If();
+	Test_Command_If_Else(); 
+	Test_Tokenizer();
+	Test_Http();
+	Test_DeviceGroups();
+
+	// this is slowest
 	Test_TuyaMCU_Basic();
 
+
+
+
+	// Just to be sure
+	// Must be last step
+	// reset whole device
+	SIM_ClearOBK();
 }
-int __cdecl main(void)
+long g_delta;
+float SIM_GetDeltaTimeSeconds() {
+	return g_delta * 0.001f;
+}
+long start_time = 0;
+bool bStartTimeSet = false;
+long SIM_GetTime() {
+	long cur = timeGetTime();
+	if (bStartTimeSet == false) {
+		start_time = cur;
+		bStartTimeSet = true;
+	}
+	return cur - start_time;
+}
+// this time counter is simulated, I need this for unit tests to work
+int rtos_get_time() {
+	return g_simulatedTimeNow;
+}
+int g_bDoingUnitTestsNow = 0;
+
+#include "sim/sim_public.h"
+int __cdecl main(int argc, char **argv)
 {
+	bool bWantsUnitTests = 1;
+
+	if (argc > 1) {
+		int value;
+
+		for (int i = 1; i < argc; i++) {
+			if (argv[i][0] == '-') {
+				if (wal_strnicmp(argv[i] + 1, "port", 4) == 0) {
+					i++;
+
+					if (i < argc && sscanf(argv[i], "%d", &value) == 1) {
+						g_port = value;
+					}
+				} else if (wal_strnicmp(argv[i] + 1, "runUnitTests", 12) == 0) {
+					i++;
+
+					if (i < argc && sscanf(argv[i], "%d", &value) == 1) {
+						bWantsUnitTests = value != 0;
+					}
+				}
+			}
+		}
+	}
 
     WSADATA wsaData;
     int iResult;
+
+#if 0
+	int maxTest = 100;
+	for (int i = 0; i <= maxTest; i++) {
+		float frac = (float)i / (float)(maxTest);
+		float in = frac;
+		float res = LED_BrightnessMapping(255, in);
+		printf("Brightness %f with color %f gives %f\n", in, 255.0f, res);
+	}
+#endif
     // Initialize Winsock
     iResult = WSAStartup(MAKEWORD(2,2), &wsaData);
     if (iResult != 0) {
         printf("WSAStartup failed with error: %d\n", iResult);
         return 1;
     }
+	printf("sizeof(short) = %d\n", (int)sizeof(short));
+	printf("sizeof(int) = %d\n", (int)sizeof(int));
+	printf("sizeof(long) = %d\n", (int)sizeof(long));
+	printf("sizeof(unsigned long) = %d\n", (int)sizeof(unsigned long));
+	printf("sizeof(float) = %d\n", (int)sizeof(float));
+	printf("sizeof(double) = %d\n", (int)sizeof(double));
+	printf("sizeof(long double) = %d\n", (int)sizeof(long double));
+	printf("sizeof(led_corr_t) = %d\n", (int)sizeof(led_corr_t));
+	
+	if (sizeof(ledRemap_t) != MAGIC_LED_REMAP_SIZE) {
+		printf("sizeof(ledRemap_t) != MAGIC_LED_REMAP_SIZE!: %i\n", sizeof(ledRemap_t));
+		system("pause");
+	}
+	if (sizeof(led_corr_t) != MAGIC_LED_CORR_SIZE) {
+		printf("sizeof(led_corr_t) != MAGIC_LED_CORR_SIZE!: %i\n", sizeof(led_corr_t));
+		system("pause");
+	}
+	//printf("Offset MQTT Group: %i", OFFSETOF(mainConfig_t, mqtt_group));
+	if (sizeof(mainConfig_t) != MAGIC_CONFIG_SIZE) {
+		printf("sizeof(mainConfig_t) != MAGIC_CONFIG_SIZE!: %i\n", sizeof(mainConfig_t));
+		system("pause");
+	}
+	if (OFFSETOF(mainConfig_t, mqtt_group) != 0x00000554) {
+		printf("OFFSETOF(mainConfig_t, mqtt_group) != 0x00000554: %i\n", OFFSETOF(mainConfig_t, mqtt_group));
+		system("pause");
+	}
+	if (OFFSETOF(mainConfig_t, LFS_Size) != 0x000004BC) {
+		printf("OFFSETOF(mainConfig_t, LFS_Size) != 0x000004BC: %i\n", OFFSETOF(mainConfig_t, LFS_Size));
+		system("pause");
+	}
+	if (OFFSETOF(mainConfig_t, ping_host) != 0x000005A0) {
+		printf("OFFSETOF(mainConfig_t, ping_host) != 0x000005A0: %i\n", OFFSETOF(mainConfig_t, ping_host));
+		system("pause");
+	}
+	if (OFFSETOF(mainConfig_t, buttonShortPress) != 0x000004B8) {
+		printf("OFFSETOF(mainConfig_t, buttonShortPress) != 0x000004B8: %i\n", OFFSETOF(mainConfig_t, buttonShortPress));
+		system("pause");
+	}
+	if (OFFSETOF(mainConfig_t, pins) != 0x0000033E) {
+		printf("OFFSETOF(mainConfig_t, pins) != 0x0000033E: %i\n", OFFSETOF(mainConfig_t, pins));
+		system("pause");
+	}
+	if (OFFSETOF(mainConfig_t, version) != 0x00000004) {
+		printf("OFFSETOF(mainConfig_t, version) != 0x00000004: %i\n", OFFSETOF(mainConfig_t, version));
+		system("pause");
+	}
+	
+	if (bWantsUnitTests) {
+		g_bDoingUnitTestsNow = 1;
+		SIM_DoFreshOBKBoot();
+		// let things warm up a little
+		Sim_RunFrames(50, false);
+		// run tests
+		Win_DoUnitTests();
+		Sim_RunFrames(50, false);
+		g_bDoingUnitTestsNow = 0;
+	}
 
-	Main_Init();
 
-	while(1) {
-		Sleep(5);
-		Sim_RunFrame();
-		if (win_frameNum == 50) {
-			Win_DoUnitTests();
+	SIM_CreateWindow(argc, argv);
+#if 0
+	CMD_ExecuteCommand("MQTTHost 192.168.0.113", 0);
+	CMD_ExecuteCommand("MqttPassword ma1oovoo0pooTie7koa8Eiwae9vohth1vool8ekaej8Voohi7beif5uMuph9Diex", 0);
+	CMD_ExecuteCommand("MqttClient WindowsOBK", 0);
+	CMD_ExecuteCommand("MqttUser homeassistant", 0);
+#else
+	CMD_ExecuteCommand("MQTTHost 192.168.0.118", 0);
+	CMD_ExecuteCommand("MqttPassword Test1", 0);
+	CMD_ExecuteCommand("MqttClient WindowsOBK", 0);
+	CMD_ExecuteCommand("MqttUser homeassistant", 0);
+#endif
+	CMD_ExecuteCommand("reboot", 0);
+	//CMD_ExecuteCommand("addRepeatingEvent 1 -1 backlog addChannel 1 1; publishInt myTestTopic $CH1", 0);
+	
+	if (false) {
+		while (1) {
+			Sleep(DEFAULT_FRAME_TIME);
+			Sim_RunFrame(DEFAULT_FRAME_TIME);
+			SIM_RunWindow();
+		}
+	}
+	else {
+		long prev_time = SIM_GetTime();
+		while (1) {
+			long cur_time = SIM_GetTime();
+			g_delta = cur_time - prev_time;
+			if (g_delta <= 0)
+				continue;
+			Sim_RunFrame(g_delta);
+			SIM_RunWindow();
+			prev_time = cur_time;
 		}
 	}
 	return 0;
@@ -231,174 +347,11 @@ void otarequest(const char *urlin) {
 	return;
 }
 
-int ota_progress();
-int ota_total_bytes();
-int __cdecl main_old(void)
-{
-    WSADATA wsaData;
-    int iResult;
-	int len;
-
-    SOCKET ListenSocket = INVALID_SOCKET;
-    SOCKET ClientSocket = INVALID_SOCKET;
-
-    struct addrinfo *result = NULL;
-    struct addrinfo hints;
-
-    int iSendResult;
-    char recvbuf[DEFAULT_BUFLEN];
-    char outbuf[DEFAULT_BUFLEN];
-    int recvbuflen = DEFAULT_BUFLEN;
-
-	strcat_safe_test();
-
-	Tokenizer_TokenizeString("dsfafd dasfdsaf dsaf dsaf dsa fdsaf dsafdsa");
-
-	CFG_ClearPins();
-	PIN_SetPinChannelForPinIndex(1,1);
-	PIN_SetPinRoleForPinIndex(1,IOR_Relay);
-
-	PIN_SetPinChannelForPinIndex(2,2);
-	PIN_SetPinRoleForPinIndex(2,IOR_PWM);
-
-	TuyaMCU_Init();
-
-    // Initialize Winsock
-    iResult = WSAStartup(MAKEWORD(2,2), &wsaData);
-    if (iResult != 0) {
-        printf("WSAStartup failed with error: %d\n", iResult);
-        return 1;
-    }
-	//NTP_SendRequest_BlockingMode();
-	//Sleep(500);
-   //     return 1;
-
-	CreateThread(NULL, 0, Thread_EverySecond, 0, 0, NULL);
-	CreateThread(NULL, 0, Thread_SimulateTUYAMCUSendingData, 0, 0, NULL);
-
-
-    ZeroMemory(&hints, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    hints.ai_flags = AI_PASSIVE;
-
-	HTTPServer_Start();
-    // Resolve the server address and port
-    iResult = getaddrinfo(NULL, DEFAULT_PORT, &hints, &result);
-    if ( iResult != 0 ) {
-        printf("getaddrinfo failed with error: %d\n", iResult);
-        WSACleanup();
-        return 1;
-    }
-
-    // Create a SOCKET for connecting to server
-    ListenSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
-    if (ListenSocket == INVALID_SOCKET) {
-        printf("socket failed with error: %ld\n", WSAGetLastError());
-        freeaddrinfo(result);
-        WSACleanup();
-        return 1;
-    }
-
-    // Setup the TCP listening socket
-    iResult = bind( ListenSocket, result->ai_addr, (int)result->ai_addrlen);
-    if (iResult == SOCKET_ERROR) {
-        printf("bind failed with error: %d\n", WSAGetLastError());
-        freeaddrinfo(result);
-        closesocket(ListenSocket);
-        WSACleanup();
-        return 1;
-    }
-
-    freeaddrinfo(result);
-
-	iResult = listen(ListenSocket, SOMAXCONN);
-	if (iResult == SOCKET_ERROR) {
-		printf("listen failed with error: %d\n", WSAGetLastError());
-		closesocket(ListenSocket);
-		WSACleanup();
-		return 1;
-	}
-
-	while(1)
-	{
-		// Accept a client socket
-		ClientSocket = accept(ListenSocket, NULL, NULL);
-		if (ClientSocket == INVALID_SOCKET) {
-			printf("accept failed with error: %d\n", WSAGetLastError());
-			closesocket(ListenSocket);
-			WSACleanup();
-			return 1;
-		}
-
-
-		// Receive until the peer shuts down the connection
-		do {
-
-			iResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
-			if (iResult > 0) {
-				http_request_t request;
-				memset(&request, 0, sizeof(request));
-
-				recvbuf[iResult] = 0;
-
-				request.fd = ClientSocket;
-				request.received = recvbuf;
-				request.receivedLen = iResult;
-				outbuf[0] = '\0';
-				request.reply = outbuf;
-				request.replylen = 0;
-
-				request.replymaxlen = DEFAULT_BUFLEN;
-
-				printf("Bytes received: %d \n", iResult);
-				len = HTTP_ProcessPacket(&request);
-
-				if(len > 0) {
-					printf("Bytes rremaining tosend %d\n", len);
-					//printf("%s\n",outbuf);
-					// Echo the buffer back to the sender
-					//leen =  strlen(request.reply);
-					iSendResult = send( ClientSocket, outbuf,len, 0 );
-					if (iSendResult == SOCKET_ERROR) {
-						printf("send failed with error: %d\n", WSAGetLastError());
-						closesocket(ClientSocket);
-						WSACleanup();
-						return 1;
-					}
-					printf("Bytes sent: %d\n", iSendResult);
-				}
-			}
-			else if (iResult == 0)
-				printf("Connection closing...\n");
-			else  {
-				printf("recv failed with error: %d\n", WSAGetLastError());
-				closesocket(ClientSocket);
-				WSACleanup();
-				return 1;
-			}
-			break;
-		} while (iResult > 0);
-
-		// shutdown the connection since we're done
-		iResult = shutdown(ClientSocket, SD_SEND);
-		if (iResult == SOCKET_ERROR) {
-			printf("shutdown failed with error: %d\n", WSAGetLastError());
-			closesocket(ClientSocket);
-			//WSACleanup();
-			//return 1;
-		}
-	}
-
-	// No longer need server socket
-	closesocket(ListenSocket);
-
-    // cleanup
-    closesocket(ClientSocket);
-    WSACleanup();
-
-    return 0;
+int ota_progress() {
+	return 0;
+}
+int ota_total_bytes() {
+	return 0;
 }
 
 #endif

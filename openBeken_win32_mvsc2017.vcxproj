@@ -83,6 +83,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Configuration)\</IntDir>
+    <TargetName>openBeken_win32</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug BL602|Win32'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
@@ -91,6 +92,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug Win32|Win32'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Configuration)\</IntDir>
+    <TargetName>openBeken_win32</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
@@ -146,7 +148,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug Win32|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>.\src\win32\stubs\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.\libs_for_simulator\SDL2-2.24.2\include;.\src\win32\stubs\;.\libs_for_simulator\DevIL-Windows-SDK-1.8.0\include;.\libs_for_simulator\freeglut-MSVC-3.0.0-2.mp\include;.\libs_for_simulator\nativefiledialog\src\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>true</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
@@ -157,6 +159,7 @@
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <TargetMachine>MachineX86</TargetMachine>
+      <AdditionalLibraryDirectories>.\libs_for_simulator\SDL2-2.24.2\lib\x86;.\libs_for_simulator\DevIL-Windows-SDK-1.8.0\lib\x86\Release;.\libs_for_simulator\freeglut-MSVC-3.0.0-2.mp\lib;.\libs_for_simulator\nativefiledialog\build\lib\Debug\x86</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">
@@ -289,21 +292,34 @@
     <ClCompile Include="src\driver\drv_bp5758d.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="src\driver\drv_bridge_driver.c" />
+    <ClCompile Include="src\driver\drv_cht8305.c" />
     <ClCompile Include="src\driver\drv_cse7766.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="src\driver\drv_ddp.c" />
+    <ClCompile Include="src\driver\drv_debouncer.c" />
+    <ClCompile Include="src\driver\drv_dht.c" />
+    <ClCompile Include="src\driver\drv_dht_internal.c" />
+    <ClCompile Include="src\driver\drv_httpButtons.c" />
     <ClCompile Include="src\driver\drv_ir.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="src\driver\drv_main.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="src\driver\drv_max72xx_internal.c" />
+    <ClCompile Include="src\driver\drv_max72xx_single.c" />
     <ClCompile Include="src\driver\drv_ntp.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="src\driver\drv_pwmToggler.c" />
+    <ClCompile Include="src\driver\drv_sht3x.c" />
     <ClCompile Include="src\driver\drv_sm2135.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="src\driver\drv_sm2235.c" />
+    <ClCompile Include="src\driver\drv_ssdp.c" />
     <ClCompile Include="src\driver\drv_tasmotaDeviceGroups.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
     </ClCompile>
@@ -316,11 +332,17 @@
     <ClCompile Include="src\driver\drv_tuyaMCUSensor.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="src\driver\drv_wemo.c">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="src\driver\drv_uart.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="src\driver\drv_ucs1912.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="src\hal\bk7231\hal_adc_bk7231.c">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32|Win32'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="src\hal\bk7231\hal_flashConfig_bk7231.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
@@ -433,6 +455,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="src\httpserver\http_tcp_server_nonblocking.c" />
+    <ClCompile Include="src\httpserver\json_interface.c" />
     <ClCompile Include="src\httpserver\new_http.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
@@ -497,11 +520,71 @@
     <ClCompile Include="src\rgb2hsv.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="src\selftest\selftest_buttonEvents.c" />
+    <ClCompile Include="src\selftest\selftest_changeHandlers.c" />
+    <ClCompile Include="src\selftest\selftest_changeHandlers_mqtt.c" />
+    <ClCompile Include="src\selftest\selftest_cmd_alias.c" />
     <ClCompile Include="src\selftest\selftest_cmd_channels.c" />
+    <ClCompile Include="src\selftest\selftest_cmd_generic.c" />
+    <ClCompile Include="src\selftest\selftest_demo_fanCyclingRelays.c" />
+    <ClCompile Include="src\selftest\selftest_demo_mapFanSpeedToRelays.c" />
+    <ClCompile Include="src\selftest\selftest_demo_scriptForShutters.c" />
+    <ClCompile Include="src\selftest\selftest_deviceGroups.c" />
+    <ClCompile Include="src\selftest\selftest_DHT.c" />
+    <ClCompile Include="src\selftest\selftest_energyMeter.c" />
+    <ClCompile Include="src\selftest\selftest_expandConstant.c" />
     <ClCompile Include="src\selftest\selftest_expressions.c" />
+    <ClCompile Include="src\selftest\selftest_flags.c" />
+    <ClCompile Include="src\selftest\selftest_hass_discovery.c" />
+    <ClCompile Include="src\selftest\selftest_http.c" />
+    <ClCompile Include="src\selftest\selftest_http_client.c" />
+    <ClCompile Include="src\selftest\selftest_if.c" />
     <ClCompile Include="src\selftest\selftest_led.c" />
+    <ClCompile Include="src\selftest\selftest_lfs.c" />
     <ClCompile Include="src\selftest\selftest_main.c" />
+    <ClCompile Include="src\selftest\selftest_mapRanges.c" />
+    <ClCompile Include="src\selftest\selftest_mqtt.c" />
+    <ClCompile Include="src\selftest\selftest_multiplePinsOnChannel.c" />
+    <ClCompile Include="src\selftest\selftest_ntp.c" />
+    <ClCompile Include="src\selftest\selftest_repeatingEvents.c" />
+    <ClCompile Include="src\selftest\selftest_role_toggleAll.c" />
+    <ClCompile Include="src\selftest\selftest_script.c" />
+    <ClCompile Include="src\selftest\selftest_demo_exclusiveRelays.c" />
+    <ClCompile Include="src\selftest\selftest_tasmota.c" />
+    <ClCompile Include="src\selftest\selftest_tokenizer.c" />
     <ClCompile Include="src\selftest\selftest_tuyaMCU.c" />
+    <ClCompile Include="src\selftest\selftest_util_mqtt.c" />
+    <ClCompile Include="src\selftest\selftest_util_mqtt_json.c" />
+    <ClCompile Include="src\sim\Circle.cpp" />
+    <ClCompile Include="src\sim\Controller_BL0942.cpp" />
+    <ClCompile Include="src\sim\Controller_Bulb.cpp" />
+    <ClCompile Include="src\sim\Controller_Button.cpp" />
+    <ClCompile Include="src\sim\Controller_Pot.cpp" />
+    <ClCompile Include="src\sim\Controller_SimulatorLink.cpp" />
+    <ClCompile Include="src\sim\CursorManager.cpp" />
+    <ClCompile Include="src\sim\Junction.cpp" />
+    <ClCompile Include="src\sim\Line.cpp" />
+    <ClCompile Include="src\sim\PrefabManager.cpp" />
+    <ClCompile Include="src\sim\RecentList.cpp" />
+    <ClCompile Include="src\sim\Rect.cpp" />
+    <ClCompile Include="src\sim\SaveLoad.cpp" />
+    <ClCompile Include="src\sim\Shape.cpp" />
+    <ClCompile Include="src\sim\Simulation.cpp" />
+    <ClCompile Include="src\sim\Simulator.cpp" />
+    <ClCompile Include="src\sim\sim_sdl.cpp" />
+    <ClCompile Include="src\sim\Solver.cpp" />
+    <ClCompile Include="src\sim\Text.cpp" />
+    <ClCompile Include="src\sim\Texture.cpp" />
+    <ClCompile Include="src\sim\TextureManager.cpp" />
+    <ClCompile Include="src\sim\Tool_Copy.cpp" />
+    <ClCompile Include="src\sim\Tool_Delete.cpp" />
+    <ClCompile Include="src\sim\Tool_Info.cpp" />
+    <ClCompile Include="src\sim\Tool_Move.cpp" />
+    <ClCompile Include="src\sim\Tool_Text.cpp" />
+    <ClCompile Include="src\sim\Tool_Use.cpp" />
+    <ClCompile Include="src\sim\Tool_Wire.cpp" />
+    <ClCompile Include="src\sim\WinMenuBar.cpp" />
+    <ClCompile Include="src\sim\Wire.cpp" />
     <ClCompile Include="src\tiny_crc8.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
     </ClCompile>
@@ -525,7 +608,41 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\driver\drv_cht8305.h" />
+    <ClInclude Include="src\driver\drv_dht_internal.h" />
+    <ClInclude Include="src\driver\drv_max72xx_internal.h" />
+    <ClInclude Include="src\driver\drv_sht3x.h" />
+    <ClInclude Include="src\driver\drv_sm2235.h" />
     <ClInclude Include="src\selftest\selftest_local.h" />
+    <ClInclude Include="src\sim\Bounds.h" />
+    <ClInclude Include="src\sim\Circle.h" />
+    <ClInclude Include="src\sim\Controller_BL0942.h" />
+    <ClInclude Include="src\sim\Controller_Bulb.h" />
+    <ClInclude Include="src\sim\Controller_Button.h" />
+    <ClInclude Include="src\sim\Controller_Pot.h" />
+    <ClInclude Include="src\sim\Controller_SimulatorLink.h" />
+    <ClInclude Include="src\sim\CursorManager.h" />
+    <ClInclude Include="src\sim\Junction.h" />
+    <ClInclude Include="src\sim\Line.h" />
+    <ClInclude Include="src\sim\PrefabManager.h" />
+    <ClInclude Include="src\sim\RecentList.h" />
+    <ClInclude Include="src\sim\Rect.h" />
+    <ClInclude Include="src\sim\SaveLoad.h" />
+    <ClInclude Include="src\sim\Shape.h" />
+    <ClInclude Include="src\sim\sim_local.h" />
+    <ClInclude Include="src\sim\Solver.h" />
+    <ClInclude Include="src\sim\Text.h" />
+    <ClInclude Include="src\sim\Texture.h" />
+    <ClInclude Include="src\sim\TextureManager.h" />
+    <ClInclude Include="src\sim\Tool_Copy.h" />
+    <ClInclude Include="src\sim\Tool_Delete.h" />
+    <ClInclude Include="src\sim\Tool_Info.h" />
+    <ClInclude Include="src\sim\Tool_Move.h" />
+    <ClInclude Include="src\sim\Tool_Text.h" />
+    <ClInclude Include="src\sim\Tool_Use.h" />
+    <ClInclude Include="src\sim\Tool_Wire.h" />
+    <ClInclude Include="src\sim\WinMenuBar.h" />
+    <ClInclude Include="src\sim\Wire.h" />
     <CustomBuild Include="..\..\platforms\bk7231t\bk7231t_os\beken378\func\include\net_param_pub.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug BL602|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
@@ -596,18 +713,6 @@
     <CustomBuild Include="src\driver\drv_uart.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
     </CustomBuild>
-    <CustomBuild Include="src\drv_bl0942.h" />
-    <CustomBuild Include="src\drv_i2c_public.h">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug BL602|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32 ScriptOnly|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Win32|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-    </CustomBuild>
-    <ClInclude Include="src\drv_public.h" />
-    <CustomBuild Include="src\drv_tuyaMCU.h">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-    </CustomBuild>
-    <ClInclude Include="src\drv_uart.h" />
     <ClInclude Include="src\hal\hal_adc.h" />
     <ClInclude Include="src\hal\hal_flashConfig.h" />
     <ClInclude Include="src\hal\hal_flashVars.h" />
@@ -657,9 +762,6 @@
     <ClInclude Include="src\new_cfg.h" />
     <ClInclude Include="src\new_cmd.h" />
     <ClInclude Include="src\new_common.h" />
-    <CustomBuild Include="src\new_http.h">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-    </CustomBuild>
     <ClInclude Include="src\new_main.h" />
     <ClInclude Include="src\new_pins.h" />
     <ClInclude Include="src\new_repeatingEvents.h" />

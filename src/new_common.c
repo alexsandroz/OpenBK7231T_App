@@ -62,7 +62,49 @@ int vsprintf3(char *buffer, const char *fmt, va_list val) {
 
 #endif
 
+#if WINDOWS
+const char* strcasestr(const char* str1, const char* str2)
+{
+	const char* p1 = str1;
+	const char* p2 = str2;
+	const char* r = *p2 == 0 ? str1 : 0;
 
+	while (*p1 != 0 && *p2 != 0)
+	{
+		if (tolower((unsigned char)*p1) == tolower((unsigned char)*p2))
+		{
+			if (r == 0)
+			{
+				r = p1;
+			}
+
+			p2++;
+		}
+		else
+		{
+			p2 = str2;
+			if (r != 0)
+			{
+				p1 = r + 1;
+			}
+
+			if (tolower((unsigned char)*p1) == tolower((unsigned char)*p2))
+			{
+				r = p1;
+				p2++;
+			}
+			else
+			{
+				r = 0;
+			}
+		}
+
+		p1++;
+	}
+
+	return *p2 == 0 ? (char*)r : 0;
+}
+#endif
 
 // Why strdup breaks strings?
 // backlog lcd_clearAndGoto I2C1 0x23 1 1; lcd_print I2C1 0x23 Enabled
@@ -212,6 +254,28 @@ void urldecode2_safe(char *dst, const char *srcin, int maxDstLen)
 		curLen++;
         }
         *dst++ = '\0';
+}
+
+int wal_stricmp(const char* a, const char* b) {
+	int ca, cb;
+	do {
+		ca = (unsigned char)*a++;
+		cb = (unsigned char)*b++;
+		ca = tolower(toupper(ca));
+		cb = tolower(toupper(cb));
+	} while ((ca == cb) && (ca != '\0'));
+	return ca - cb;
+}
+int wal_strnicmp(const char* a, const char* b, int count) {
+	int ca, cb;
+	do {
+		ca = (unsigned char)*a++;
+		cb = (unsigned char)*b++;
+		ca = tolower(toupper(ca));
+		cb = tolower(toupper(cb));
+		count--;
+	} while ((ca == cb) && (ca != '\0') && (count > 0));
+	return ca - cb;
 }
 
 WIFI_RSSI_LEVEL wifi_rssi_scale(int8_t rssi_value)

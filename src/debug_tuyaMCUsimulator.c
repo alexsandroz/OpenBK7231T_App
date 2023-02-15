@@ -4,7 +4,59 @@
 
 const char *dataToSimulate[] =
 {
-#if 0
+	// dummy entry in order to avoid problems with empty table
+	"",
+#if 1
+	""
+#elif 1
+	// 0x21 packet type - Weather Data - for testing
+	"55AA002100400108772E74656D702E300004000000160C772E68756D69646974792E3000040000004608772E706D32352E3000040000002607772E6171692E3000040000006C30",
+#elif 0
+	"55AA030000010003",
+	"55AA0301002A7B2270223A226C696834766A656F79616F346A656B75222C2276223A22322E302E30222C226D223A307D41",
+	"55AA0302000004",
+	"55AA0303000005",
+	"55AA030000010104",
+	"55AA0303000005",
+	"55AA03070014060000080928000000000000010200040000000467",
+	"55AA0307000C03000008160B160B0000000466",
+	"55AA0307000C040000080B1D0B1D0000000071",
+	"55AA030700060B00000201001D",
+	"55AA030700111001000101120300083232343930303638E9",
+	"55AA0324000026",
+	"55AA031C00001E",
+	"55AA031C00001E",
+	"55AA031C00001E",
+	"55AA030000010104",
+	"55AA0324000026",
+	"55AA030000010104",
+#elif 0
+	"55AA00050005010400010110",
+	"55AA0005000501040001000F"
+#elif 0
+	"55AA03070014060000080916000099000023010200040000000310",
+	"55AA0307000C03000008160C160C0000000367",
+	"55AA0307000C040000080C010C01000000033E",
+	"55AA030700140600000809350000F800003A010200040000002FD1"
+#elif 0
+	"55AA030000010003",
+	"55AA0301002A7B2270223A226C696834766A656F79616F346A656B75222C2276223A22322E302E30222C226D223A307D41",
+	"55AA0302000004",
+	"55AA0303000005",
+	"55AA030000010104",
+	"55AA0303000005",
+	"55AA03070014060000080928000000000000010200040000000467",
+	"55AA0307000C03000008160B160B0000000466",
+	"55AA0307000C040000080B1D0B1D0000000071",
+	"55AA030700060B00000201001D",
+	"55AA030700111001000101120300083232343930303638E9",
+	"55AA0324000026",
+	"55AA031C00001E",
+	"55AA031C00001E",
+	"55AA031C00001E",
+	"55AA030000010104",
+	"55AA0324000026",
+	"55AA030000010104",
 #elif 0
 	"55AA0307000801020004000000041C",
 	"55AA030700130600000F0000000C0000001001C3000077091CAD",
@@ -19,7 +71,7 @@ const char *dataToSimulate[] =
 	"55AA030700086D0200040000000387",
 	"55AA030700086E0200040000001095",
 	"55AA030700086F020004000001BE45",
-#elif 0
+#elif 1
 
 #else
 	"55AA030700130600000F000000BF0000013C01F800064F0930B4",
@@ -29,15 +81,25 @@ const char *dataToSimulate[] =
 	"55AA030700130600000F000000BD0000013B01F5000646092DA2",
 #endif
 };
+// TODO: place it better
+extern int g_bDoingUnitTestsNow;
+
 int g_totalStrings = sizeof(dataToSimulate) / sizeof(dataToSimulate[0]);
 
-int delay_between_packets = 200;
+int delay_between_packets = 20;
+int max_bytes_per_frame = 200;
 int curString = 0;
 const char *curP = 0;
-int current_delay_to_wait_ms = 1000;
+int current_delay_to_wait_ms = 100;
 
 void NewTuyaMCUSimulator_RunQuickTick(int deltaMS) {
+	byte b;
+	int c_added = 0;
+
 	if (g_totalStrings <= 0) {
+		return;
+	}
+	if (g_bDoingUnitTestsNow) {
 		return;
 	}
 	if (current_delay_to_wait_ms > 0) {
@@ -48,9 +110,52 @@ void NewTuyaMCUSimulator_RunQuickTick(int deltaMS) {
 		curP = dataToSimulate[curString];
 	}
 
-	byte b = hexbyte(curP);
-	UART_AppendByteToCircularBuffer(b);
-	curP += 2;
+#if 1
+#elif 1
+	if (DRV_IsRunning("TuyaMCU") == 0) {
+		CMD_ExecuteCommand("startDriver TuyaMCU", 0);
+	}
+#elif 0
+	if (DRV_IsRunning("TuyaMCU") == 0) {
+		CMD_ExecuteCommand("startDriver TuyaMCU", 0);
+		CMD_ExecuteCommand("startDriver tmSensor ", 0);
+		CMD_ExecuteCommand("setChannelType 1 readonly", 0);
+		CMD_ExecuteCommand("linkTuyaMCUOutputToChannel 1 val 1", 0);
+	}
+#else
+	if (DRV_IsRunning("TuyaMCU") == 0) {
+		CMD_ExecuteCommand("startDriver TuyaMCU", 0);
+		CMD_ExecuteCommand("startDriver NTP", 0);
+		CMD_ExecuteCommand("setChannelType 1 toggle", 0);
+		CMD_ExecuteCommand("setChannelType 2 Voltage_div10", 0);
+		CMD_ExecuteCommand("setChannelType 3 Power", 0);
+		CMD_ExecuteCommand("setChannelType 4 Current_div1000", 0);
+		CMD_ExecuteCommand("setChannelType 5 EnergyTotal_kWh_div100", 0);
+		CMD_ExecuteCommand("linkTuyaMCUOutputToChannel 16 bool 1", 0);
+		CMD_ExecuteCommand("linkTuyaMCUOutputToChannel 1 val 5", 0);
+		// TAC2121C VoltageCurrentPower Packet
+		CMD_ExecuteCommand("linkTuyaMCUOutputToChannel 6 RAW_TAC2121C_VCP", 0);
+		CMD_ExecuteCommand("linkTuyaMCUOutputToChannel 4 RAW_TAC2121C_Yesterday", 0);
+		CMD_ExecuteCommand("linkTuyaMCUOutputToChannel 3 RAW_TAC2121C_LastMonth", 0);
+	}
+#endif
+	// make sure that buffer has free size
+	if (UART_GetDataSize() != 0) {
+		return;
+	}
+	while (*curP != 0) {
+		if (*curP == ' ') {
+			curP++;
+			continue;
+		}
+		c_added++;
+		if (c_added >= max_bytes_per_frame) {
+			break;
+		}
+		b = hexbyte(curP);
+		UART_AppendByteToCircularBuffer(b);
+		curP += 2;
+	}
 	if (*curP == 0) {
 		curString++;
 		if (curString >= g_totalStrings)

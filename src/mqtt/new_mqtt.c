@@ -9,6 +9,7 @@
 #include "../hal/hal_wifi.h"
 #include "../driver/drv_public.h"
 #include "../driver/drv_ntp.h"
+#include "../driver/drv_tuyaMCU.h"
 #include "../ota/ota.h"
 
 #ifndef LWIP_MQTT_EXAMPLE_IPADDR_INIT
@@ -19,98 +20,93 @@
 #endif
 #endif
 
-int wal_stricmp(const char* a, const char* b) {
-	int ca, cb;
-	do {
-		ca = (unsigned char)*a++;
-		cb = (unsigned char)*b++;
-		ca = tolower(toupper(ca));
-		cb = tolower(toupper(cb));
-	} while ((ca == cb) && (ca != '\0'));
-	return ca - cb;
+#ifdef PLATFORM_BEKEN
+#include <tcpip.h>
+// from hal_main_bk7231.c
+// triggers a one-shot timer to cause read.
+extern void MQTT_TriggerRead();
+#endif
+
+
+// these won't exist except on Beken?
+#ifndef LOCK_TCPIP_CORE
+#define LOCK_TCPIP_CORE()
+#endif
+
+#ifndef UNLOCK_TCPIP_CORE
+#define UNLOCK_TCPIP_CORE()
+#endif
+
+//
+// Variables for periodical self state broadcast
+//
+// current time left (counting down)
+static int g_secondsBeforeNextFullBroadcast = 30;
+// constant value, how much interval between self state broadcast (enabled by flag)
+// You can change it with command: mqtt_broadcastInterval 60
+static int g_intervalBetweenMQTTBroadcasts = 60;
+// While doing self state broadcast, it limits the number of publishes 
+// per second in order not to overload LWIP
+static int g_maxBroadcastItemsPublishedPerSecond = 1;
+
+/////////////////////////////////////////////////////////////
+// mqtt receive buffer, so we can action in our threads, not
+// in tcp_thread
+//
+#define MQTT_RX_BUFFER_MAX 4096
+unsigned char mqtt_rx_buffer[MQTT_RX_BUFFER_MAX];
+int mqtt_rx_buffer_head;
+int mqtt_rx_buffer_tail;
+int mqtt_rx_buffer_count;
+unsigned char temp_topic[128];
+unsigned char temp_data[2048];
+
+int addLenData(int len, const unsigned char *data){
+	mqtt_rx_buffer[mqtt_rx_buffer_head] = (len >> 8) & 0xff;
+	mqtt_rx_buffer_head = (mqtt_rx_buffer_head + 1) % MQTT_RX_BUFFER_MAX;
+	mqtt_rx_buffer_count++;
+	mqtt_rx_buffer[mqtt_rx_buffer_head] = (len) & 0xff;
+	mqtt_rx_buffer_head = (mqtt_rx_buffer_head + 1) % MQTT_RX_BUFFER_MAX;
+	mqtt_rx_buffer_count++;
+	for (int i = 0; i < len; i++){
+		mqtt_rx_buffer[mqtt_rx_buffer_head] = data[i];
+		mqtt_rx_buffer_head = (mqtt_rx_buffer_head + 1) % MQTT_RX_BUFFER_MAX;
+		mqtt_rx_buffer_count++;
+	}
+	return len + 2;
 }
-int wal_strnicmp(const char* a, const char* b, int count) {
-	int ca, cb;
-	do {
-		ca = (unsigned char)*a++;
-		cb = (unsigned char)*b++;
-		ca = tolower(toupper(ca));
-		cb = tolower(toupper(cb));
-		count--;
-	} while ((ca == cb) && (ca != '\0') && (count > 0));
-	return ca - cb;
+
+int getLenData(int *len, unsigned char *data, int maxlen){
+	int l;
+	l = mqtt_rx_buffer[mqtt_rx_buffer_tail];
+	mqtt_rx_buffer_tail = (mqtt_rx_buffer_tail + 1) % MQTT_RX_BUFFER_MAX;
+	mqtt_rx_buffer_count--;
+	l = l<<8;
+	l |= mqtt_rx_buffer[mqtt_rx_buffer_tail];
+	mqtt_rx_buffer_tail = (mqtt_rx_buffer_tail + 1) % MQTT_RX_BUFFER_MAX;
+	mqtt_rx_buffer_count--;
+
+	for (int i = 0; i < l; i++){
+		if (i < maxlen){
+			data[i] = mqtt_rx_buffer[mqtt_rx_buffer_tail];
+		}
+		mqtt_rx_buffer_tail = (mqtt_rx_buffer_tail + 1) % MQTT_RX_BUFFER_MAX;
+		mqtt_rx_buffer_count--;
+	}
+	if (mqtt_rx_buffer_count < 0){
+		addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, "MQTT_rx buffer underflow!!!");
+		mqtt_rx_buffer_count = 0;
+		mqtt_rx_buffer_tail = mqtt_rx_buffer_head = 0;
+	}
+
+	if (l > maxlen){
+		*len = maxlen;
+	} else {
+		*len = l;
+	}
+	return l + 2;
 }
 
-#define MQTT_QUEUE_ITEM_IS_REUSABLE(x)  (x->topic[0] == 0)
-#define MQTT_QUEUE_ITEM_SET_REUSABLE(x) (x->topic[0] = 0)
-
-MqttPublishItem_t* g_MqttPublishQueueHead = NULL;
-int g_MqttPublishItemsQueued = 0;   //Items in the queue waiting to be published. This is not the queue length.
-OBK_Publish_Result PublishQueuedItems();
-
-// from mqtt.c
-extern void mqtt_disconnect(mqtt_client_t* client);
-
-static int g_my_reconnect_mqtt_after_time = -1;
-ip_addr_t mqtt_ip LWIP_MQTT_EXAMPLE_IPADDR_INIT;
-mqtt_client_t* mqtt_client;
-static int g_timeSinceLastMQTTPublish = 0;
-static int mqtt_initialised = 0;
-static int mqtt_connect_events = 0;
-static int mqtt_connect_result = ERR_OK;
-static char mqtt_status_message[256];
-static int mqtt_published_events = 0;
-static int mqtt_publish_errors = 0;
-static int mqtt_received_events = 0;
-
-typedef struct mqtt_callback_tag {
-	char* topic;
-	char* subscriptionTopic;
-	int ID;
-	mqtt_callback_fn callback;
-} mqtt_callback_t;
-
-#define MAX_MQTT_CALLBACKS 32
-static mqtt_callback_t* callbacks[MAX_MQTT_CALLBACKS];
-static int numCallbacks = 0;
-// note: only one incomming can be processed at a time.
-static obk_mqtt_request_t g_mqtt_request;
-
-#define LOOPS_WITH_DISCONNECTED 15
-int loopsWithDisconnected = 0;
-int mqtt_reconnect = 0;
-// set for the device to broadcast self state on start
-int g_bPublishAllStatesNow = 0;
-
-#define PUBLISHITEM_ALL_INDEX_FIRST   -15
-
-//These 3 values are pretty much static
-#define PUBLISHITEM_SELF_STATIC_RESERVED_2      -15
-#define PUBLISHITEM_SELF_STATIC_RESERVED_1      -14
-#define PUBLISHITEM_SELF_HOSTNAME               -13  //Device name
-#define PUBLISHITEM_SELF_BUILD                  -12  //Build
-#define PUBLISHITEM_SELF_MAC                    -11  //Device mac
-
-#define PUBLISHITEM_DYNAMIC_INDEX_FIRST         -10
-
-#define PUBLISHITEM_QUEUED_VALUES               -10  //Publish queued items
-
-//These values are dynamic
-#define PUBLISHITEM_SELF_DATETIME               -9  //Current unix datetime
-#define PUBLISHITEM_SELF_SOCKETS                -8  //Active sockets
-#define PUBLISHITEM_SELF_RSSI                   -7  //Link strength
-#define PUBLISHITEM_SELF_UPTIME                 -6  //Uptime
-#define PUBLISHITEM_SELF_FREEHEAP               -5  //Free heap
-#define PUBLISHITEM_SELF_IP                     -4  //ip address
-
-#define PUBLISHITEM_SELF_DYNAMIC_LIGHTSTATE     -3
-#define PUBLISHITEM_SELF_DYNAMIC_LIGHTMODE      -2
-#define PUBLISHITEM_SELF_DYNAMIC_DIMMER         -1
-
-int g_publishItemIndex = PUBLISHITEM_ALL_INDEX_FIRST;
-static bool g_firstFullBroadcast = true;  //Flag indicating that we need to do a full broadcast
-
-int g_memoryErrorsThisSession = 0;
 static SemaphoreHandle_t g_mutex = 0;
 
 static bool MQTT_Mutex_Take(int del) {
@@ -131,6 +127,100 @@ static void MQTT_Mutex_Free()
 {
 	xSemaphoreGive(g_mutex);
 }
+
+// this is called from tcp_thread context to queue received mqtt,
+// and then we'll retrieve them from our own thread for processing.
+//
+// NOTE: this function is now public, but only because my unit tests
+// system can use it to spoof MQTT packets to check if MQTT commands
+// are working...
+int MQTT_Post_Received(const char *topic, int topiclen, const unsigned char *data, int datalen){
+	MQTT_Mutex_Take(100);
+	if ((MQTT_RX_BUFFER_MAX - 1 - mqtt_rx_buffer_count) < topiclen + datalen + 2 + 2){
+		addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, "MQTT_rx buffer overflow for topic %s", topic);
+	} else {
+		addLenData(topiclen, (unsigned char *)topic);
+		addLenData(datalen, data);
+	}
+	MQTT_Mutex_Free();
+
+
+#ifdef PLATFORM_BEKEN
+	MQTT_TriggerRead();
+#endif
+	return 1;
+}
+int MQTT_Post_Received_Str(const char *topic, const char *data) {
+	return MQTT_Post_Received(topic, strlen(topic), (const unsigned char*)data, strlen(data));
+}
+int get_received(char **topic, int *topiclen, unsigned char **data, int *datalen){
+	int res = 0;
+	MQTT_Mutex_Take(100);
+	if (mqtt_rx_buffer_tail != mqtt_rx_buffer_head){
+		getLenData(topiclen, temp_topic, sizeof(temp_topic)-1);
+		temp_topic[*topiclen] = 0;
+		getLenData(datalen, temp_data, sizeof(temp_data)-1);
+		temp_data[*datalen] = 0;
+		*topic = (char *)temp_topic;
+		*data = temp_data;
+		res = 1;
+	}
+	MQTT_Mutex_Free();
+	return res;
+}
+//
+//////////////////////////////////////////////////////////////////////
+
+#define MQTT_QUEUE_ITEM_IS_REUSABLE(x)  (x->topic[0] == 0)
+#define MQTT_QUEUE_ITEM_SET_REUSABLE(x) (x->topic[0] = 0)
+
+MqttPublishItem_t* g_MqttPublishQueueHead = NULL;
+int g_MqttPublishItemsQueued = 0;   //Items in the queue waiting to be published. This is not the queue length.
+OBK_Publish_Result PublishQueuedItems();
+OBK_Publish_Result MQTT_ChannelPublish(int channel, int flags);
+
+// from mqtt.c
+extern void mqtt_disconnect(mqtt_client_t* client);
+
+static int g_my_reconnect_mqtt_after_time = -1;
+ip_addr_t mqtt_ip LWIP_MQTT_EXAMPLE_IPADDR_INIT;
+mqtt_client_t* mqtt_client;
+static int g_timeSinceLastMQTTPublish = 0;
+static int mqtt_initialised = 0;
+static int mqtt_connect_events = 0;
+static int mqtt_connect_result = ERR_OK;
+static char mqtt_status_message[256];
+static int mqtt_published_events = 0;
+static int mqtt_publish_errors = 0;
+static int mqtt_received_events = 0;
+
+static int g_just_connected = 0;
+
+
+typedef struct mqtt_callback_tag {
+	char* topic;
+	char* subscriptionTopic;
+	int ID;
+	mqtt_callback_fn callback;
+} mqtt_callback_t;
+
+#define MAX_MQTT_CALLBACKS 32
+static mqtt_callback_t* callbacks[MAX_MQTT_CALLBACKS];
+static int numCallbacks = 0;
+// note: only one incomming can be processed at a time.
+static obk_mqtt_request_t g_mqtt_request;
+static obk_mqtt_request_t g_mqtt_request_cb;
+
+#define LOOPS_WITH_DISCONNECTED 15
+int loopsWithDisconnected = 0;
+int mqtt_reconnect = 0;
+// set for the device to broadcast self state on start
+int g_bPublishAllStatesNow = 0;
+int g_publishItemIndex = PUBLISHITEM_ALL_INDEX_FIRST;
+static bool g_firstFullBroadcast = true;  //Flag indicating that we need to do a full broadcast
+
+int g_memoryErrorsThisSession = 0;
+int g_mqtt_bBaseTopicDirty = 0;
 
 void MQTT_PublishWholeDeviceState_Internal(bool bAll)
 {
@@ -176,6 +266,7 @@ static struct mqtt_connect_client_info_t mqtt_client_info =
 
 // channel set callback
 int channelSet(obk_mqtt_request_t* request);
+int channelGet(obk_mqtt_request_t* request);
 static void MQTT_do_connect(mqtt_client_t* client);
 static void mqtt_connection_cb(mqtt_client_t* client, void* arg, mqtt_connection_status_t status);
 
@@ -266,6 +357,17 @@ char* MQTT_GetStatusMessage(void)
 	return mqtt_status_message;
 }
 
+void MQTT_ClearCallbacks() {
+	int i;
+	for (i = 0; i < MAX_MQTT_CALLBACKS; i++) {
+		if (callbacks[i]) {
+			free(callbacks[i]->topic);
+			free(callbacks[i]->subscriptionTopic);
+			free(callbacks[i]);
+			callbacks[i] = 0;
+		}
+	}
+}
 // this can REPLACE callbacks, since we MAY wish to change the root topic....
 // in which case we would re-resigster all callbacks?
 int MQTT_RegisterCallback(const char* basetopic, const char* subscriptiontopic, int ID, mqtt_callback_fn callback) {
@@ -383,32 +485,126 @@ int MQTT_RemoveCallback(int ID) {
 	return 0;
 }
 
+const char *skipExpected(const char *p, const char *tok) {
+	while (1) {
+		if (*p == 0)
+			return 0;
+		if (*p != *tok)
+			return 0;
+		p++;
+		tok++;
+		if (*tok == 0) {
+			if (*p == '/') {
+				p++;
+				return p;
+			}
+			return 0;
+		}
+	}
+	return p;
+}
+/** From a MQTT topic formatted <client>/<topic>, check if <client> is present
+ *  and return <topic>.
+ *
+ *  @param topic	The topic to parse
+ *  @return 		The topic without the client, or NULL if <client>/ wasn't present
+ */
+const char* MQTT_RemoveClientFromTopic(const char* topic, const char *prefix) {
+	const char *p2;
+	const char *p = topic;
+	if (prefix) {
+		p = skipExpected(p, prefix);
+		if (p == 0) {
+			return 0;
+		}
+	}
+	// it is either group topic or a device topic
+	p2 = skipExpected(p, CFG_GetMQTTClientId());
+	if (p2 == 0) {
+		p2 = skipExpected(p, CFG_GetMQTTGroupTopic());
+	}
+	return p2;
+}
+
+// this accepts obkXXXXXX/<chan>/get to request channel publish
+int channelGet(obk_mqtt_request_t* request) {
+	//int len = request->receivedLen;
+	int channel = 0;
+	const char* p;
+
+	// we only support here publishes with emtpy value, otherwise we would get into
+	// a loop where we receive a get, and then send get reply with val, and receive our own get
+	if (request->receivedLen) {
+		return 1;
+	}
+
+	addLogAdv(LOG_DEBUG, LOG_FEATURE_MQTT, "channelGet topic %i with arg %s", request->topic, request->received);
+
+	p = MQTT_RemoveClientFromTopic(request->topic,0);
+
+	if (p == NULL) {
+		return 0;
+	}
+
+	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "channelGet part topic %s", p);
+
+	if (!stricmp(p, "led_enableAll")) {
+		LED_SendEnableAllState();
+		return 1;
+	}
+	if (!stricmp(p, "led_dimmer")) {
+		LED_SendDimmerChange();
+		return 1;
+	}
+	if (!stricmp(p, "led_temperature")) {
+		sendTemperatureChange();
+		return 1;
+	}
+	if (!stricmp(p, "led_finalcolor_rgb")) {
+		sendFinalColor();
+		return 1;
+	}
+	if (!stricmp(p, "led_basecolor_rgb")) {
+		sendColorChange();
+		return 1;
+	}
+
+	// atoi won't parse any non-decimal chars, so it should skip over the rest of the topic.
+	channel = atoi(p);
+
+	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "channelGet channel %i", channel);
+
+	// if channel out of range, stop here.
+	if ((channel < 0) || (channel > 32)) {
+		return 0;
+	}
+
+MQTT_ChannelPublish(channel, 0);
+
+// return 1 to stop processing callbacks here.
+// return 0 to allow later callbacks to process this topic.
+return 1;
+}
 // this accepts obkXXXXXX/<chan>/set to receive data to set channels
 int channelSet(obk_mqtt_request_t* request) {
-	// we only need a few bytes to receive a decimal number 0-100
-	char copy[12];
-	int len = request->receivedLen;
-	char* p = request->topic;
+	//int len = request->receivedLen;
 	int channel = 0;
 	int iValue = 0;
+	char* p;
+	const char *argument;
 
 	addLogAdv(LOG_DEBUG, LOG_FEATURE_MQTT, "channelSet topic %i with arg %s", request->topic, request->received);
 
-	// TODO: better
-	while (*p != '/') {
-		if (*p == 0)
-			return 0;
-		p++;
+	p = MQTT_RemoveClientFromTopic(request->topic,0);
+
+	if (p == NULL) {
+		return 0;
 	}
-	p++;
+
 	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "channelSet part topic %s", p);
 
-	if ((*p - '0' >= 0) && (*p - '0' <= 9)) {
-		channel = atoi(p);
-	}
-	else {
-		channel = -1;
-	}
+	// atoi won't parse any non-decimal chars, so it should skip over the rest of the topic.
+	channel = atoi(p);
 
 	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "channelSet channel %i", channel);
 
@@ -417,32 +613,26 @@ int channelSet(obk_mqtt_request_t* request) {
 		return 0;
 	}
 
-	// find something after channel - should be <base>/<chan>/set
-	while (*p != '/') {
-		if (*p == 0)
-			return 0;
-		p++;
-	}
-	p++;
+	// make sure the topic ends with '/set'.
+	p = strchr(p, '/');
 
 	// if not /set, then stop here
-	if (strcmp(p, "set")) {
+	if (strcmp(p, "/set")) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "channelSet NOT 'set'");
 		return 0;
 	}
 
-	if (len > sizeof(copy) - 1) {
-		len = sizeof(copy) - 1;
+	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "MQTT client in mqtt_incoming_data_cb data is %.*s for ch %i\n", MQTT_MAX_DATA_LOG_LENGTH, request->received, channel);
+
+	argument = ((const char*)request->received);
+
+	if (!wal_strnicmp(argument, "toggle", 6)) {
+		CHANNEL_Toggle(channel);
 	}
-
-	strncpy(copy, (char*)request->received, len);
-	// strncpy does not terminate??!!!!
-	copy[len] = '\0';
-
-	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "MQTT client in mqtt_incoming_data_cb data is %s for ch %i\n", copy, channel);
-
-	iValue = atoi((char*)copy);
-	CHANNEL_Set(channel, iValue, 0);
+	else {
+		iValue = atoi(argument);
+		CHANNEL_Set(channel, iValue, 0);
+	}
 
 	// return 1 to stop processing callbacks here.
 	// return 0 to allow later callbacks to process this topic.
@@ -450,31 +640,123 @@ int channelSet(obk_mqtt_request_t* request) {
 }
 
 
-// this accepts cmnd/<clientId>/<xxx> to receive data to set channels
-int tasCmnd(obk_mqtt_request_t* request) {
-	// we only need a few bytes to receive a decimal number 0-100
-	char copy[64];
-	int len = request->receivedLen;
-	const char* p = request->topic;
+// this accepts cmnd/<clientId>/<xxx> to execute any supported console command
+// Example 1: 
+// Topic: cmnd/obk8C112233/power
+// Payload: toggle
+// this will toggle power
+// Example 2:
+// Topic: cmnd/obk8C112233/backlog
+// Payload: echo Test1; power toggle; echo Test2
+// will do echo, toggle power and do ecoh
+//
 
-	// assume a string input here, copy and terminate
-	if (len > sizeof(copy) - 1) {
-		len = sizeof(copy) - 1;
+
+void MQTT_PublishPrinterContentsToStat(obk_mqtt_publishReplyPrinter_t *printer, const char *statName) {
+	const char *toUse;
+	if (printer->allocated)
+		toUse = printer->allocated;
+	else
+		toUse = printer->stackBuffer;
+	MQTT_PublishStat(statName, toUse);
+}
+void MQTT_PublishPrinterContentsToTele(obk_mqtt_publishReplyPrinter_t *printer, const char *statName) {
+	const char *toUse;
+	if (printer->allocated)
+		toUse = printer->allocated;
+	else
+		toUse = printer->stackBuffer;
+	MQTT_PublishTele(statName, toUse);
+}
+int mqtt_printf255(obk_mqtt_publishReplyPrinter_t* request, const char* fmt, ...) {
+	va_list argList;
+	char tmp[256];
+	int myLen;
+
+	memset(tmp, 0, sizeof(tmp));
+	va_start(argList, fmt);
+	vsnprintf(tmp, 255, fmt, argList);
+	va_end(argList);
+
+	myLen = strlen(tmp);
+
+	if (request->curLen + (myLen + 2) >= MQTT_STACK_BUFFER_SIZE) {
+		if (request->curLen + (myLen + 2) >= MQTT_TOTAL_BUFFER_SIZE) {
+			// TODO: realloc
+			return 0;
+		}
+		// init alloced if needed
+		if (request->allocated == 0) {
+			request->allocated = malloc(MQTT_TOTAL_BUFFER_SIZE);
+			strcpy(request->allocated, request->stackBuffer);
+		}
+		strcat(request->allocated, tmp);
 	}
-	strncpy(copy, (char*)request->received, len);
-	// strncpy does not terminate??!!!!
-	copy[len] = '\0';
+	else {
+		strcat(request->stackBuffer, tmp);
+	}
+	request->curLen += myLen;
+	return 0;
+}
+void MQTT_ProcessCommandReplyJSON(const char *cmd, const char *args, int flags) {
+	obk_mqtt_publishReplyPrinter_t replyBuilder;
+	memset(&replyBuilder, 0, sizeof(obk_mqtt_publishReplyPrinter_t));
+	JSON_ProcessCommandReply(cmd, args, &replyBuilder, (jsonCb_t)mqtt_printf255, flags);
+	if (replyBuilder.allocated != 0) {
+		free(replyBuilder.allocated);
+	}
+}
+int tasCmnd(obk_mqtt_request_t* request) {
+	const char *p, *args, *p2;
 
-	// TODO: better
-	// skip to after second forward slash
-	while (*p != '/') { if (*p == 0) return 0; p++; }
-	p++;
-	while (*p != '/') { if (*p == 0) return 0; p++; }
-	p++;
 
-	// use command executor....
-	CMD_ExecuteCommandArgs(p, copy, COMMAND_FLAG_SOURCE_MQTT);
+	p = MQTT_RemoveClientFromTopic(request->topic, "cmnd");
+	if (p == 0) {
+		p = MQTT_RemoveClientFromTopic(request->topic, "tele");
+		if (p == 0) {
+			p = MQTT_RemoveClientFromTopic(request->topic, "stat");
+			if (p == 0) {
 
+			}
+		}
+	}
+	if (p == 0)
+		return 1;
+
+#if 1
+	args = (const char *)request->received;
+	// I think that our function get_received always ensured that
+	// there is a NULL terminating character after payload of MQTT
+	// So we can feed it directly as command
+	CMD_ExecuteCommandArgs(p, args, COMMAND_FLAG_SOURCE_MQTT);
+	MQTT_ProcessCommandReplyJSON(p, args, COMMAND_FLAG_SOURCE_MQTT);
+#else
+	int len = request->receivedLen;
+	char copy[64];
+	char *allocated;
+	// assume a string input here, copy and terminate
+	// Try to avoid free/malloc
+	if (len > sizeof(copy) - 2) {
+		allocated = (char*)malloc(len + 1);
+		if (allocated) {
+			strncpy(allocated, (char*)request->received, len);
+			// strncpy does not terminate??!!!!
+			allocated[len] = '\0';
+		}
+		// use command executor....
+		CMD_ExecuteCommandArgs(p, allocated, COMMAND_FLAG_SOURCE_MQTT);
+		if (allocated) {
+			free(allocated);
+		}
+	}
+	else {
+		strncpy(copy, (char*)request->received, len);
+		// strncpy does not terminate??!!!!
+		copy[len] = '\0';
+		// use command executor....
+		CMD_ExecuteCommandArgs(p, copy, COMMAND_FLAG_SOURCE_MQTT);
+	}
+#endif
 	// return 1 to stop processing callbacks here.
 	// return 0 to allow later callbacks to process this topic.
 	return 1;
@@ -490,7 +772,10 @@ static void MQTT_disconnect(mqtt_client_t* client)
 	if (!client)
 		return;
 	// this is what it was renamed to.  why?
+	LOCK_TCPIP_CORE();
 	mqtt_disconnect(client);
+	UNLOCK_TCPIP_CORE();
+
 }
 
 /* Called when publish is complete either with sucess or failure */
@@ -538,8 +823,17 @@ static OBK_Publish_Result MQTT_PublishTopicToClient(mqtt_client_t* client, const
 	{
 		retain = 1;
 	}
+	if (flags & OBK_PUBLISH_FLAG_FORCE_REMOVE_GET)
+	{
+		appendGet = false;
+	}
 
-	if (mqtt_client_is_connected(client) == 0)
+
+	LOCK_TCPIP_CORE();
+	int res = mqtt_client_is_connected(client);
+	UNLOCK_TCPIP_CORE();
+
+	if (res == 0)
 	{
 		g_my_reconnect_mqtt_after_time = 5;
 		MQTT_Mutex_Free();
@@ -561,21 +855,24 @@ static OBK_Publish_Result MQTT_PublishTopicToClient(mqtt_client_t* client, const
 			addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Publishing val (%d bytes) to %s retain=%i\n", sVal_len, pub_topic, retain);
 		}
 
+
+		LOCK_TCPIP_CORE();
 		err = mqtt_publish(client, pub_topic, sVal, strlen(sVal), qos, retain, mqtt_pub_request_cb, 0);
+		UNLOCK_TCPIP_CORE();
 		os_free(pub_topic);
 
 		if (err != ERR_OK)
 		{
 			if (err == ERR_CONN)
 			{
-				addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Publish err: ERR_CONN aka %d\n", err);
+				addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, "Publish err: ERR_CONN aka %d\n", err);
 			}
 			else if (err == ERR_MEM) {
-				addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Publish err: ERR_MEM aka %d\n", err);
+				addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, "Publish err: ERR_MEM aka %d\n", err);
 				g_memoryErrorsThisSession++;
 			}
 			else {
-				addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Publish err: %d\n", err);
+				addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, "Publish err: %d\n", err);
 			}
 			mqtt_publish_errors++;
 			MQTT_Mutex_Free();
@@ -598,14 +895,25 @@ static OBK_Publish_Result MQTT_PublishMain(mqtt_client_t* client, const char* sC
 {
 	return MQTT_PublishTopicToClient(mqtt_client, CFG_GetMQTTClientId(), sChannel, sVal, flags, appendGet);
 }
-
+OBK_Publish_Result MQTT_PublishTele(const char* teleName, const char* teleValue)
+{
+	char topic[64];
+	snprintf(topic, sizeof(topic), "tele/%s", CFG_GetMQTTClientId());
+	return MQTT_PublishTopicToClient(mqtt_client, topic, teleName, teleValue, 0, false);
+}
+OBK_Publish_Result MQTT_PublishStat(const char* statName, const char* statValue)
+{
+	char topic[64];
+	snprintf(topic,sizeof(topic),"stat/%s", CFG_GetMQTTClientId());
+	return MQTT_PublishTopicToClient(mqtt_client, topic, statName, statValue, 0, false);
+}
 /// @brief Publish a MQTT message immediately.
 /// @param sTopic 
 /// @param sChannel 
 /// @param sVal 
 /// @param flags
 /// @return 
-OBK_Publish_Result MQTT_Publish(char* sTopic, char* sChannel, char* sVal, int flags)
+OBK_Publish_Result MQTT_Publish(const char* sTopic, const char* sChannel, const char* sVal, int flags)
 {
 	return MQTT_PublishTopicToClient(mqtt_client, sTopic, sChannel, sVal, flags, false);
 }
@@ -614,6 +922,9 @@ void MQTT_OBK_Printf(char* s) {
 	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, s);
 }
 
+////////////////////////////////////////
+// called from tcp_thread context.
+// we should do callbacks from one of our threads?
 static void mqtt_incoming_data_cb(void* arg, const u8_t* data, u16_t len, u8_t flags)
 {
 	int i;
@@ -632,20 +943,65 @@ static void mqtt_incoming_data_cb(void* arg, const u8_t* data, u16_t len, u8_t f
 
 		for (i = 0; i < numCallbacks; i++)
 		{
+			if (callbacks[i] == 0)
+				continue;
 			char* cbtopic = callbacks[i]->topic;
 			if (!strncmp(g_mqtt_request.topic, cbtopic, strlen(cbtopic)))
 			{
+				MQTT_Post_Received(g_mqtt_request.topic, strlen(g_mqtt_request.topic), data, len);
+				// if ANYONE is interested, store it.
+				break;
 				// note - callback must return 1 to say it ate the mqtt, else further processing can be performed.
 				// i.e. multiple people can get each topic if required.
-				if (callbacks[i]->callback(&g_mqtt_request))
-				{
-					return;
-				}
+				//if (callbacks[i]->callback(&g_mqtt_request))
+				//{
+				//	return;
+				//}
 			}
 		}
+		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "MQTT topic not handled: %s", g_mqtt_request.topic);
 	}
 }
 
+
+// run from userland (quicktick or wakeable thread)
+int MQTT_process_received(){
+	char *topic;
+	int topiclen;
+	unsigned char *data;
+	int datalen;
+	int found = 0;
+	int count = 0;
+	do{
+		found = get_received(&topic, &topiclen, &data, &datalen);
+		if (found){
+			count++;
+			strncpy(g_mqtt_request_cb.topic, topic, sizeof(g_mqtt_request_cb.topic));
+			g_mqtt_request_cb.received = data;
+			g_mqtt_request_cb.receivedLen = datalen;
+			for (int i = 0; i < numCallbacks; i++)
+			{
+				char* cbtopic = callbacks[i]->topic;
+				if (!strncmp(topic, cbtopic, strlen(cbtopic)))
+				{
+					// note - callback must return 1 to say it ate the mqtt, else further processing can be performed.
+					// i.e. multiple people can get each topic if required.
+					if (callbacks[i]->callback(&g_mqtt_request_cb))
+					{
+						// if no further processing, then break this loop.
+						break;
+					}
+				}
+			}
+		}
+	} while (found);
+
+	return count;
+}
+
+
+////////////////////////////////
+// called from tcp_thread context
 static void mqtt_incoming_publish_cb(void* arg, const char* topic, u32_t tot_len)
 {
 	//const char *p;
@@ -668,22 +1024,15 @@ static void mqtt_incoming_publish_cb(void* arg, const char* topic, u32_t tot_len
 	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "MQTT client in mqtt_incoming_publish_cb topic %s\n", topic);
 }
 
-static void
-mqtt_request_cb(void* arg, err_t err)
+static void mqtt_request_cb(void* arg, err_t err)
 {
 	const struct mqtt_connect_client_info_t* client_info = (const struct mqtt_connect_client_info_t*)arg;
 
-	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "MQTT client \"%s\" request cb: err %d\n", client_info->client_id, (int)err);
+	addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, "MQTT client \"%s\" request cb: err %d\n", client_info->client_id, (int)err);
 }
 
-static void mqtt_sub_request_cb(void* arg, err_t result)
-{
-	/* Just print the result code here for simplicity,
-	   normal behaviour would be to take some action if subscribe fails like
-	   notifying user, retry subscribe or disconnect from server */
-	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Subscribe result: %i\n", result);
-}
-
+/////////////////////////////////////////////
+// should be called in tcp_thread context.
 static void mqtt_connection_cb(mqtt_client_t* client, void* arg, mqtt_connection_status_t status)
 {
 	int i;
@@ -700,10 +1049,12 @@ static void mqtt_connection_cb(mqtt_client_t* client, void* arg, mqtt_connection
 	{
 		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "mqtt_connection_cb: Successfully connected\n");
 
+		//LOCK_TCPIP_CORE();
 		mqtt_set_inpub_callback(mqtt_client,
 			mqtt_incoming_publish_cb,
 			mqtt_incoming_data_cb,
 			LWIP_CONST_CAST(void*, &mqtt_client_info));
+		//UNLOCK_TCPIP_CORE();
 
 		// subscribe to all callback subscription topics
 		// this makes a BIG assumption that we can subscribe multiple times to the same one?
@@ -728,21 +1079,17 @@ static void mqtt_connection_cb(mqtt_client_t* client, void* arg, mqtt_connection
 		clientId = CFG_GetMQTTClientId();
 
 		snprintf(tmp, sizeof(tmp), "%s/connected", clientId);
+		//LOCK_TCPIP_CORE();
 		err = mqtt_publish(client, tmp, "online", strlen("online"), 2, true, mqtt_pub_request_cb, 0);
+		//UNLOCK_TCPIP_CORE();
 		if (err != ERR_OK) {
-			addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Publish err: %d\n", err);
+			addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, "Publish err: %d\n", err);
 			if (err == ERR_CONN) {
 				// g_my_reconnect_mqtt_after_time = 5;
 			}
 		}
 
-		// publish all values on state
-		if (CFG_HasFlag(OBK_FLAG_MQTT_BROADCASTSELFSTATEONCONNECT)) {
-			MQTT_PublishWholeDeviceState();
-		}
-		else {
-			//MQTT_PublishOnlyDeviceChannelsIfPossible();
-		}
+		g_just_connected = 1;
 
 		//mqtt_sub_unsub(client,
 		//        "topic_qos1", 1,
@@ -833,10 +1180,12 @@ static void MQTT_do_connect(mqtt_client_t* client)
 		  to establish a connection with the server.
 		  For now MQTT version 3.1.1 is always used */
 
+		LOCK_TCPIP_CORE();
 		res = mqtt_client_connect(mqtt_client,
 			&mqtt_ip, mqtt_port,
 			mqtt_connection_cb, LWIP_CONST_CAST(void*, &mqtt_client_info),
 			&mqtt_client_info);
+		UNLOCK_TCPIP_CORE();
 		mqtt_connect_result = res;
 		if (res != ERR_OK)
 		{
@@ -881,17 +1230,72 @@ OBK_Publish_Result MQTT_PublishMain_StringString(const char* sChannel, const cha
 	return MQTT_PublishMain(mqtt_client, sChannel, valueStr, flags, true);
 
 }
+double MQTT_MultiplierConfiguredOnChannel(int channel, int iVal) {
+	// Init double variable
+	double dVal = 0;
+
+	// Checking if flag is set
+	if (CFG_HasFlag(OBK_FLAG_PUBLISH_MULTIPLIED_VALUES)) {
+		switch (CHANNEL_GetType(channel))
+		{
+		case ChType_Humidity_div10:
+		case ChType_Temperature_div10:
+		case ChType_Voltage_div10:
+			dVal = (double)iVal / 10;
+			break;
+		case ChType_Frequency_div100:
+		case ChType_Current_div100:
+		case ChType_EnergyTotal_kWh_div100:
+			dVal = (double)iVal / 100;
+			break;
+		case ChType_PowerFactor_div1000:
+		case ChType_EnergyTotal_kWh_div1000:
+		case ChType_EnergyExport_kWh_div1000:
+		case ChType_EnergyToday_kWh_div1000:
+		case ChType_Current_div1000:
+			dVal = (double)iVal / 1000;
+			break;
+		default:
+			break;
+		}
+	}
+
+	// Returning double value. If it is zero then we dod nothing, or the value is indeed zero so it doesn't matter if we send a double or int.
+	return dVal;
+}
 OBK_Publish_Result MQTT_ChannelChangeCallback(int channel, int iVal)
 {
 	char channelNameStr[8];
 	char valueStr[16];
+	int flags;
 
-	addLogAdv(LOG_INFO, LOG_FEATURE_MAIN, "Channel has changed! Publishing change %i with %i \n", channel, iVal);
+	// Getting double value if any, and converting if required
+	double dVal = MQTT_MultiplierConfiguredOnChannel(channel, iVal);
+	if (dVal == 0) {
+		// Integer value
+		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Channel has changed! Publishing %i to channel %i \n", iVal, channel);
+		sprintf(valueStr, "%i", iVal);
+	}
+	else {
+		// Float value
+		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Channel has changed! Publishing %f to channel %i \n", dVal, channel);
+		sprintf(valueStr, "%lf", dVal);
+	}
 
+	flags = 0;
+	MQTT_BroadcastTasmotaTeleSTATE();
+
+	// String from channel number
 	sprintf(channelNameStr, "%i", channel);
-	sprintf(valueStr, "%i", iVal);
 
-	return MQTT_PublishMain(mqtt_client, channelNameStr, valueStr, 0, true);
+	// This will set RETAIN flag for all channels that are used for RELAY
+	if (CFG_HasFlag(OBK_FLAG_MQTT_RETAIN_POWER_CHANNELS)) {
+		if (CHANNEL_IsPowerRelayChannel(channel)) {
+			flags |= OBK_PUBLISH_FLAG_RETAIN;
+		}
+	}
+
+	return MQTT_PublishMain(mqtt_client, channelNameStr, valueStr, flags, true);
 }
 OBK_Publish_Result MQTT_ChannelPublish(int channel, int flags)
 {
@@ -901,24 +1305,42 @@ OBK_Publish_Result MQTT_ChannelPublish(int channel, int flags)
 
 	iValue = CHANNEL_Get(channel);
 
-	addLogAdv(LOG_INFO, LOG_FEATURE_MAIN, "Forced channel publish! Publishing val %i to %i", iValue, channel);
+	// Getting double value if any, and converting if required
+	double dVal = MQTT_MultiplierConfiguredOnChannel(channel, iValue);
+	if (dVal == 0) {
+		// Integer value
+		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Forced channel publish! Publishing val %i to %i", iValue, channel);
+		sprintf(valueStr, "%i", iValue);
+	}
+	else {
+		// Float value
+		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Forced channel publish! Publishing val %f to %i", dVal, channel);
+		sprintf(valueStr, "%lf", dVal);
+	}
 
+	// String from channel number
 	sprintf(channelNameStr, "%i", channel);
-	sprintf(valueStr, "%i", iValue);
+
+	// This will set RETAIN flag for all channels that are used for RELAY
+	if (CFG_HasFlag(OBK_FLAG_MQTT_RETAIN_POWER_CHANNELS)) {
+		if (CHANNEL_IsPowerRelayChannel(channel)) {
+			flags |= OBK_PUBLISH_FLAG_RETAIN;
+		}
+	}
 
 	return MQTT_PublishMain(mqtt_client, channelNameStr, valueStr, flags, true);
 }
 // This console command will trigger a publish of all used variables (channels and extra stuff)
-OBK_Publish_Result MQTT_PublishAll(const void* context, const char* cmd, const char* args, int cmdFlags) {
+commandResult_t MQTT_PublishAll(const void* context, const char* cmd, const char* args, int cmdFlags) {
 	MQTT_PublishWholeDeviceState_Internal(true);
-	return 1;// TODO make return values consistent for all console commands
+	return CMD_RES_OK;// TODO make return values consistent for all console commands
 }
 // This console command will trigger a publish of runtime variables
-OBK_Publish_Result MQTT_PublishChannels(const void* context, const char* cmd, const char* args, int cmdFlags) {
+commandResult_t MQTT_PublishChannels(const void* context, const char* cmd, const char* args, int cmdFlags) {
 	MQTT_PublishOnlyDeviceChannelsIfPossible();
-	return 1;// TODO make return values consistent for all console commands
+	return CMD_RES_OK;// TODO make return values consistent for all console commands
 }
-OBK_Publish_Result MQTT_PublishCommand(const void* context, const char* cmd, const char* args, int cmdFlags) {
+commandResult_t MQTT_PublishCommand(const void* context, const char* cmd, const char* args, int cmdFlags) {
 	const char* topic, * value;
 	OBK_Publish_Result ret;
 
@@ -926,16 +1348,56 @@ OBK_Publish_Result MQTT_PublishCommand(const void* context, const char* cmd, con
 
 	if (Tokenizer_GetArgsCount() < 2) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Publish command requires two arguments (topic and value)");
-		return 0;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	topic = Tokenizer_GetArg(0);
 	value = Tokenizer_GetArg(1);
 
 	ret = MQTT_PublishMain_StringString(topic, value, 0);
 
-	return ret;
+	return CMD_RES_OK;
+}
+// we have a separate command for integer because it can support math expressions
+// (so it handled like $CH10*10, etc)
+commandResult_t MQTT_PublishCommandInteger(const void* context, const char* cmd, const char* args, int cmdFlags) {
+	const char* topic;
+	int value;
+	OBK_Publish_Result ret;
+
+	Tokenizer_TokenizeString(args, 0);
+
+	if (Tokenizer_GetArgsCount() < 2) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Publish command requires two arguments (topic and value)");
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+	topic = Tokenizer_GetArg(0);
+	value = Tokenizer_GetArgInteger(1);
+
+	ret = MQTT_PublishMain_StringInt(topic, value);
+
+	return CMD_RES_OK;
 }
 
+// we have a separate command for float because it can support math expressions
+// (so it handled like $CH10*0.01, etc)
+commandResult_t MQTT_PublishCommandFloat(const void* context, const char* cmd, const char* args, int cmdFlags) {
+	const char* topic;
+	float value;
+	OBK_Publish_Result ret;
+
+	Tokenizer_TokenizeString(args, 0);
+
+	if (Tokenizer_GetArgsCount() < 2) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Publish command requires two arguments (topic and value)");
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+	topic = Tokenizer_GetArg(0);
+	value = Tokenizer_GetArgFloat(1);
+
+	ret = MQTT_PublishMain_StringFloat(topic, value);
+
+	return CMD_RES_OK;
+}
 /****************************************************************************************************
  *
  ****************************************************************************************************/
@@ -970,13 +1432,20 @@ void MQTT_Test_Tick(void* param)
 	{
 		while (1)
 		{
-			if (mqtt_client_is_connected(mqtt_client) == 0)
+
+			LOCK_TCPIP_CORE();
+			int res = mqtt_client_is_connected(mqtt_client);
+			UNLOCK_TCPIP_CORE();
+
+			if (res == 0)
 				break;
 			if (info->msg_cnt < info->msg_num)
 			{
 				sprintf(info->value, "TestMSG: %li/%li Time: %i s, Rate: %i msg/s", info->msg_cnt, info->msg_num,
 					(int)info->bench_time, (int)info->bench_rate);
+				LOCK_TCPIP_CORE();
 				err = mqtt_publish(mqtt_client, info->topic, info->value, strlen(info->value), qos, retain, mqtt_pub_request_cb, 0);
+				UNLOCK_TCPIP_CORE();
 				if (err == ERR_OK)
 				{
 					/* MSG published */
@@ -1004,7 +1473,9 @@ void MQTT_Test_Tick(void* param)
 					/* Publish report */
 					sprintf(info->value, "Benchmark completed. %li msg published. Total Time: %i s MsgRate: %i msg/s",
 						info->msg_cnt, (int)info->bench_time, (int)info->bench_rate);
+					LOCK_TCPIP_CORE();
 					err = mqtt_publish(mqtt_client, info->topic, info->value, strlen(info->value), qos, retain, mqtt_pub_request_cb, 0);
+					UNLOCK_TCPIP_CORE();
 					if (err == ERR_OK)
 					{
 						/* Report published */
@@ -1019,6 +1490,30 @@ void MQTT_Test_Tick(void* param)
 	}
 }
 
+commandResult_t MQTT_SetMaxBroadcastItemsPublishedPerSecond(const void* context, const char* cmd, const char* args, int cmdFlags)
+{
+	Tokenizer_TokenizeString(args, 0);
+
+	if (Tokenizer_GetArgsCount() < 1) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Requires 1 arg");
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+	g_maxBroadcastItemsPublishedPerSecond = Tokenizer_GetArgInteger(0);
+
+	return CMD_RES_OK;
+}
+commandResult_t MQTT_SetBroadcastInterval(const void* context, const char* cmd, const char* args, int cmdFlags)
+{
+	Tokenizer_TokenizeString(args, 0);
+
+	if (Tokenizer_GetArgsCount() < 1) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Requires 1 arg");
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+	g_intervalBetweenMQTTBroadcasts = Tokenizer_GetArgInteger(0);
+
+	return CMD_RES_OK;
+}
 static BENCHMARK_TEST_INFO* info = NULL;
 
 #if WINDOWS
@@ -1046,7 +1541,7 @@ static OS_Timer_t timer;
 static beken_timer_t g_mqtt_timer;
 #endif
 
-int MQTT_StartMQTTTestThread(const void* context, const char* cmd, const char* args, int cmdFlags)
+commandResult_t MQTT_StartMQTTTestThread(const void* context, const char* cmd, const char* args, int cmdFlags)
 {
 	if (info != NULL)
 	{
@@ -1055,13 +1550,13 @@ int MQTT_StartMQTTTestThread(const void* context, const char* cmd, const char* a
 		info->TestStartTick = xTaskGetTickCount();
 		info->msg_cnt = 0;
 		info->report_published = false;
-		return 0;
+		return CMD_RES_OK;
 	}
 
 	info = (BENCHMARK_TEST_INFO*)os_malloc(sizeof(BENCHMARK_TEST_INFO));
 	if (info == NULL)
 	{
-		return -1;
+		return CMD_RES_ERROR;
 	}
 
 	memset(info, 0, sizeof(BENCHMARK_TEST_INFO));
@@ -1080,7 +1575,7 @@ int MQTT_StartMQTTTestThread(const void* context, const char* cmd, const char* a
 	if (OS_TimerCreate(&timer, OS_TIMER_PERIODIC, MQTT_Test_Tick, (void*)info, MQTT_TMR_DURATION) != OS_OK)
 	{
 		printf("PIN_AddCommands timer create failed\n");
-		return -1;
+		return CMD_RES_ERROR;
 	}
 	OS_TimerStart(&timer); /* start OS timer to feed watchdog */
 #else
@@ -1091,22 +1586,24 @@ int MQTT_StartMQTTTestThread(const void* context, const char* cmd, const char* a
 	result = rtos_start_timer(&g_mqtt_timer);
 	ASSERT(kNoErr == result);
 #endif
-	return 0;
+	return CMD_RES_OK;
 }
 
 /****************************************************************************************************
  *
  ****************************************************************************************************/
 
- // initialise things MQTT
- // called from user_main
-void MQTT_init()
-{
+void MQTT_InitCallbacks() {
 	char cbtopicbase[CGF_MQTT_CLIENT_ID_SIZE + 16];
 	char cbtopicsub[CGF_MQTT_CLIENT_ID_SIZE + 16];
 	const char* clientId;
+	const char* groupId;
+
+	MQTT_ClearCallbacks();
+	g_mqtt_bBaseTopicDirty = 0;
 
 	clientId = CFG_GetMQTTClientId();
+	groupId = CFG_GetMQTTGroupTopic();
 
 	// register the main set channel callback
 	snprintf(cbtopicbase, sizeof(cbtopicbase), "%s/", clientId);
@@ -1114,19 +1611,107 @@ void MQTT_init()
 	// note: this may REPLACE an existing entry with the same ID.  ID 1 !!!
 	MQTT_RegisterCallback(cbtopicbase, cbtopicsub, 1, channelSet);
 
+	// so-called "Group topic", a secondary topic that can be set on multiple devices 
+	// to control them together
+	// register the TAS cmnd callback
+	if (*groupId) {
+		// register the main set channel callback
+		snprintf(cbtopicbase, sizeof(cbtopicbase), "%s/", groupId);
+		snprintf(cbtopicsub, sizeof(cbtopicsub), "%s/+/set", groupId);
+		// note: this may REPLACE an existing entry with the same ID.  ID 2 !!!
+		MQTT_RegisterCallback(cbtopicbase, cbtopicsub, 2, channelSet);
+	}
+
+	// base topic
 	// register the TAS cmnd callback
 	snprintf(cbtopicbase, sizeof(cbtopicbase), "cmnd/%s/", clientId);
 	snprintf(cbtopicsub, sizeof(cbtopicsub), "cmnd/%s/+", clientId);
-	// note: this may REPLACE an existing entry with the same ID.  ID 2 !!!
-	MQTT_RegisterCallback(cbtopicbase, cbtopicsub, 2, tasCmnd);
+	// note: this may REPLACE an existing entry with the same ID.  ID 3 !!!
+	MQTT_RegisterCallback(cbtopicbase, cbtopicsub, 3, tasCmnd);
+
+	// so-called "Group topic", a secondary topic that can be set on multiple devices 
+	// to control them together
+	// register the TAS cmnd callback
+	if (*groupId) {
+		snprintf(cbtopicbase, sizeof(cbtopicbase), "cmnd/%s/", groupId);
+		snprintf(cbtopicsub, sizeof(cbtopicsub), "cmnd/%s/+", groupId);
+		// note: this may REPLACE an existing entry with the same ID.  ID 4 !!!
+		MQTT_RegisterCallback(cbtopicbase, cbtopicsub, 4, tasCmnd);
+	}
+
+	// register the getter callback (send empty message here to get reply)
+	snprintf(cbtopicbase, sizeof(cbtopicbase), "%s/", clientId);
+	snprintf(cbtopicsub, sizeof(cbtopicsub), "%s/+/get", clientId);
+	// note: this may REPLACE an existing entry with the same ID.  ID 5 !!!
+	MQTT_RegisterCallback(cbtopicbase, cbtopicsub, 5, channelGet);
+
+	if (CFG_HasFlag(OBK_FLAG_DO_TASMOTA_TELE_PUBLISHES)) {
+		// test hack iobroker
+		snprintf(cbtopicbase, sizeof(cbtopicbase), "tele/%s/", clientId);
+		snprintf(cbtopicsub, sizeof(cbtopicsub), "tele/%s/+", clientId);
+		// note: this may REPLACE an existing entry with the same ID.  ID 6 !!!
+		MQTT_RegisterCallback(cbtopicbase, cbtopicsub, 6, tasCmnd);
+
+		// test hack iobroker
+		snprintf(cbtopicbase, sizeof(cbtopicbase), "stat/%s/", clientId);
+		snprintf(cbtopicsub, sizeof(cbtopicsub), "stat/%s/+", clientId);
+		// note: this may REPLACE an existing entry with the same ID.  ID 7 !!!
+		MQTT_RegisterCallback(cbtopicbase, cbtopicsub, 7, tasCmnd);
+	}
+}
+ // initialise things MQTT
+ // called from user_main
+void MQTT_init()
+{
+	// WINDOWS must support reinit
+#ifdef WINDOWS
+	mqtt_client = 0;
+#endif
+
+	MQTT_InitCallbacks();
 
 	mqtt_initialised = 1;
 
-	CMD_RegisterCommand(MQTT_COMMAND_PUBLISH, "", MQTT_PublishCommand, "Sqqq", NULL);
-	CMD_RegisterCommand(MQTT_COMMAND_PUBLISH_ALL, "", MQTT_PublishAll, "Sqqq", NULL);
-	CMD_RegisterCommand(MQTT_COMMAND_PUBLISH_CHANNELS, "", MQTT_PublishChannels, "Sqqq", NULL);
-	CMD_RegisterCommand(MQTT_COMMAND_PUBLISH_BENCHMARK, "", MQTT_StartMQTTTestThread, "", NULL);
-
+	//cmddetail:{"name":"publish","args":"[Topic][Value]",
+	//cmddetail:"descr":"Publishes data by MQTT. The final topic will be obk0696FB33/[Topic]/get. You can use argument expansion here, so $CH11 will change to value of the channel 11",
+	//cmddetail:"fn":"MQTT_PublishCommand","file":"mqtt/new_mqtt.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("publish", MQTT_PublishCommand, NULL);
+	//cmddetail:{"name":"publishInt","args":"[Topic][Value]",
+	//cmddetail:"descr":"Publishes data by MQTT. The final topic will be obk0696FB33/[Topic]/get. You can use argument expansion here, so $CH11 will change to value of the channel 11. This version of command publishes an integer, so you can also use math expressions like $CH10*10, etc.",
+	//cmddetail:"fn":"MQTT_PublishCommand","file":"mqtt/new_mqtt.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("publishInt", MQTT_PublishCommandInteger, NULL);
+	//cmddetail:{"name":"publishFloat","args":"[Topic][Value]",
+	//cmddetail:"descr":"Publishes data by MQTT. The final topic will be obk0696FB33/[Topic]/get. You can use argument expansion here, so $CH11 will change to value of the channel 11. This version of command publishes an float, so you can also use math expressions like $CH10*0.0, etc.",
+	//cmddetail:"fn":"MQTT_PublishCommand","file":"mqtt/new_mqtt.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("publishFloat", MQTT_PublishCommandFloat, NULL);
+	//cmddetail:{"name":"publishAll","args":"",
+	//cmddetail:"descr":"Starts the step by step publish of all available values",
+	//cmddetail:"fn":"MQTT_PublishAll","file":"mqtt/new_mqtt.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("publishAll", MQTT_PublishAll, NULL);
+	//cmddetail:{"name":"publishChannels","args":"",
+	//cmddetail:"descr":"Starts the step by step publish of all channel values",
+	//cmddetail:"fn":"MQTT_PublishChannels","file":"mqtt/new_mqtt.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("publishChannels", MQTT_PublishChannels, NULL);
+	//cmddetail:{"name":"publishBenchmark","args":"",
+	//cmddetail:"descr":"",
+	//cmddetail:"fn":"MQTT_StartMQTTTestThread","file":"mqtt/new_mqtt.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("publishBenchmark", MQTT_StartMQTTTestThread, NULL);
+	//cmddetail:{"name":"mqtt_broadcastInterval","args":"[ValueSeconds]",
+	//cmddetail:"descr":"If broadcast self state every 60 seconds/minute is enabled in flags, this value allows you to change the delay, change this 60 seconds to any other value in seconds. This value is not saved, you must use autoexec.bat or short startup command to execute it on every reboot.",
+	//cmddetail:"fn":"MQTT_SetBroadcastInterval","file":"mqtt/new_mqtt.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("mqtt_broadcastInterval", MQTT_SetBroadcastInterval, NULL);
+	//cmddetail:{"name":"mqtt_broadcastItemsPerSec","args":"[PublishCountPerSecond]",
+	//cmddetail:"descr":"If broadcast self state (this option in flags) is started, then gradually device info is published, with a speed of N publishes per second. Do not set too high value, it may overload LWIP MQTT library. This value is not saved, you must use autoexec.bat or short startup command to execute it on every reboot.",
+	//cmddetail:"fn":"MQTT_SetMaxBroadcastItemsPublishedPerSecond","file":"mqtt/new_mqtt.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("mqtt_broadcastItemsPerSec", MQTT_SetMaxBroadcastItemsPublishedPerSecond, NULL);
 }
 
 OBK_Publish_Result MQTT_DoItemPublishString(const char* sChannel, const char* valueStr)
@@ -1136,8 +1721,9 @@ OBK_Publish_Result MQTT_DoItemPublishString(const char* sChannel, const char* va
 
 OBK_Publish_Result MQTT_DoItemPublish(int idx)
 {
-	int role;
+	//int type;
 	char dataStr[3 * 6 + 1];  //This is sufficient to hold mac value
+	bool bWantsToPublish;
 
 	switch (idx) {
 	case PUBLISHITEM_SELF_STATIC_RESERVED_2:
@@ -1205,15 +1791,60 @@ OBK_Publish_Result MQTT_DoItemPublish(int idx)
 	// We do not need raw values for RGBCW lights (or RGB, etc)
 	// because we are using led_basecolor_rgb, led_dimmer, led_enableAll, etc
 	// NOTE: negative indexes are not channels - they are special values
-	role = CHANNEL_GetRoleForOutputChannel(idx);
-	if (role == IOR_Relay || role == IOR_Relay_n || role == IOR_LED || role == IOR_LED_n) {
-		MQTT_ChannelPublish(g_publishItemIndex, OBK_PUBLISH_FLAG_MUTEX_SILENT);
+	bWantsToPublish = false;
+	if (CHANNEL_HasRoleThatShouldBePublished(idx)) {
+		bWantsToPublish = true;
+	}
+#ifdef ENABLE_DRIVER_TUYAMCU
+	// publish if channel is used by TuyaMCU (no pin role set), for example door sensor state with power saving V0 protocol
+	// Not enabled by default, you have to set OBK_FLAG_TUYAMCU_ALWAYSPUBLISHCHANNELS flag
+	if (!bWantsToPublish && CFG_HasFlag(OBK_FLAG_TUYAMCU_ALWAYSPUBLISHCHANNELS) && TuyaMCU_IsChannelUsedByTuyaMCU(idx)) {
+		bWantsToPublish = true;
+	}
+#endif
+	// TODO
+	//type = CHANNEL_GetType(idx);
+	if (bWantsToPublish) {
+		return MQTT_ChannelPublish(g_publishItemIndex, OBK_PUBLISH_FLAG_MUTEX_SILENT);
 	}
 
 	return OBK_PUBLISH_WAS_NOT_REQUIRED; // didnt publish
 }
-static int g_secondsBeforeNextFullBroadcast = 30;
 
+// from 5ms quicktick
+int MQTT_RunQuickTick(){
+#ifndef PLATFORM_BEKEN
+	// on Beken, we use a one-shot timer for this.
+	MQTT_process_received();
+#endif
+	return 0;
+}
+
+int g_timeSinceLastTasmotaTeleSent = 99;
+int g_wantTasmotaTeleSend = 0;
+void MQTT_BroadcastTasmotaTeleSENSOR() {
+	bool bHasAnySensor = false;
+#ifndef OBK_DISABLE_ALL_DRIVERS
+	if (DRV_IsMeasuringPower()) {
+		bHasAnySensor = true;
+	}
+#endif
+	if (bHasAnySensor) {
+		MQTT_ProcessCommandReplyJSON("SENSOR", "", COMMAND_FLAG_SOURCE_TELESENDER);
+	}
+}
+void MQTT_BroadcastTasmotaTeleSTATE() {
+	if (CFG_HasFlag(OBK_FLAG_DO_TASMOTA_TELE_PUBLISHES) == false) {
+		return;
+	}
+	if (g_timeSinceLastTasmotaTeleSent < 1) {
+		g_wantTasmotaTeleSend = 1;
+		return;
+	}
+	MQTT_ProcessCommandReplyJSON("STATE", "", COMMAND_FLAG_SOURCE_TELESENDER);
+	MQTT_BroadcastTasmotaTeleSENSOR();
+	g_wantTasmotaTeleSend = 0;
+}
 // called from user timer.
 int MQTT_RunEverySecondUpdate()
 {
@@ -1232,6 +1863,10 @@ int MQTT_RunEverySecondUpdate()
 	{
 		return 0;
 	}
+	if (g_mqtt_bBaseTopicDirty) {
+		MQTT_InitCallbacks();
+		mqtt_reconnect = 5;
+	}
 
 	// reconnect if went into MQTT library ERR_MEM forever loop
 	if (g_memoryErrorsThisSession >= 5)
@@ -1241,6 +1876,12 @@ int MQTT_RunEverySecondUpdate()
 		mqtt_reconnect = 5;
 	}
 
+	int res = 0;
+	if (mqtt_client){
+		LOCK_TCPIP_CORE();
+		res = mqtt_client_is_connected(mqtt_client);
+		UNLOCK_TCPIP_CORE();
+	}
 	// if asked to reconnect (e.g. change of topic(s))
 	if (mqtt_reconnect > 0)
 	{
@@ -1248,7 +1889,7 @@ int MQTT_RunEverySecondUpdate()
 		if (mqtt_reconnect == 0)
 		{
 			// then if connected, disconnect, and then it will reconnect automatically in 2s
-			if (mqtt_client && mqtt_client_is_connected(mqtt_client))
+			if (mqtt_client && res)
 			{
 				MQTT_disconnect(mqtt_client);
 				loopsWithDisconnected = LOOPS_WITH_DISCONNECTED - 2;
@@ -1256,7 +1897,7 @@ int MQTT_RunEverySecondUpdate()
 		}
 	}
 
-	if (mqtt_client == 0 || mqtt_client_is_connected(mqtt_client) == 0)
+	if (mqtt_client == 0 || res == 0)
 	{
 		//addLogAdv(LOG_INFO,LOG_FEATURE_MAIN, "Timer discovers disconnected mqtt %i\n",loopsWithDisconnected);
 #if WINDOWS
@@ -1272,14 +1913,18 @@ int MQTT_RunEverySecondUpdate()
 			{
 				if (mqtt_client == 0)
 				{
+					LOCK_TCPIP_CORE();
 					mqtt_client = mqtt_client_new();
+					UNLOCK_TCPIP_CORE();
 				}
 				else
 				{
+					LOCK_TCPIP_CORE();
 					mqtt_disconnect(mqtt_client);
 #if defined(MQTT_CLIENT_CLEANUP)
 					mqtt_client_cleanup(mqtt_client);
 #endif
+					UNLOCK_TCPIP_CORE();
 				}
 				MQTT_do_connect(mqtt_client);
 				mqtt_connect_events++;
@@ -1290,10 +1935,28 @@ int MQTT_RunEverySecondUpdate()
 		return 0;
 	}
 	else {
+		// things to do in our threads on connection accepted.
+		if (g_just_connected){
+			g_just_connected = 0;
+			// publish TELE
+			MQTT_BroadcastTasmotaTeleSTATE();
+			// publish all values on state
+			if (CFG_HasFlag(OBK_FLAG_MQTT_BROADCASTSELFSTATEONCONNECT)) {
+				MQTT_PublishWholeDeviceState();
+			}
+			else {
+				//MQTT_PublishOnlyDeviceChannelsIfPossible();
+			}
+		}
+
 		MQTT_Mutex_Free();
 		// below mutex is not required any more
 
 		// it is connected
+		g_timeSinceLastTasmotaTeleSent++;
+		if (g_wantTasmotaTeleSend) {
+			MQTT_BroadcastTasmotaTeleSTATE();
+		}
 		g_timeSinceLastMQTTPublish++;
 #if WINDOWS
 #elif PLATFORM_BL602
@@ -1303,10 +1966,25 @@ int MQTT_RunEverySecondUpdate()
 		if (ota_progress() != -1)
 		{
 			addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "OTA started MQTT will be closed\n");
+			LOCK_TCPIP_CORE();
 			mqtt_disconnect(mqtt_client);
+			UNLOCK_TCPIP_CORE();
 			return 1;
 		}
 #endif
+
+		if (CFG_HasFlag(OBK_FLAG_DO_TASMOTA_TELE_PUBLISHES)) {
+			static int g_mqtt_tasmotaTeleCounter = 0;
+			g_mqtt_tasmotaTeleCounter++;
+			if (g_mqtt_tasmotaTeleCounter % 3 == 0) {
+				MQTT_BroadcastTasmotaTeleSENSOR();
+			}
+			if (g_mqtt_tasmotaTeleCounter > 120) {
+				g_mqtt_tasmotaTeleCounter = 0;
+				MQTT_BroadcastTasmotaTeleSTATE();
+			}
+		}
+
 		// do we want to broadcast full state?
 		// Do it slowly in order not to overload the buffers
 		// The item indexes start at negative values for special items
@@ -1337,7 +2015,7 @@ int MQTT_RunEverySecondUpdate()
 					if (publishRes == OBK_PUBLISH_OK)
 					{
 						g_sent_thisFrame++;
-						if (g_sent_thisFrame >= 1)
+						if (g_sent_thisFrame >= g_maxBroadcastItemsPublishedPerSecond)
 						{
 							g_publishItemIndex++;
 							break;
@@ -1370,7 +2048,7 @@ int MQTT_RunEverySecondUpdate()
 				g_secondsBeforeNextFullBroadcast--;
 				if (g_secondsBeforeNextFullBroadcast <= 0)
 				{
-					g_secondsBeforeNextFullBroadcast = 60;
+					g_secondsBeforeNextFullBroadcast = g_intervalBetweenMQTTBroadcasts;
 					MQTT_PublishWholeDeviceState();
 				}
 			}
@@ -1404,7 +2082,7 @@ MqttPublishItem_t* find_queue_reusable_item(MqttPublishItem_t* head) {
 /// @param value 
 /// @param flags
 /// @param command Command to execute after the publish
-void MQTT_QueuePublishWithCommand(char* topic, char* channel, char* value, int flags, PostPublishCommands command) {
+void MQTT_QueuePublishWithCommand(const char* topic, const char* channel, const char* value, int flags, PostPublishCommands command) {
 	MqttPublishItem_t* newItem;
 	if (g_MqttPublishItemsQueued >= MQTT_MAX_QUEUE_SIZE) {
 		addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, "Unable to queue! %i items already present\r\n", g_MqttPublishItemsQueued);
@@ -1447,12 +2125,24 @@ void MQTT_QueuePublishWithCommand(char* topic, char* channel, char* value, int f
 	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Queued topic=%s/%s, %i items in queue", newItem->topic, newItem->channel, g_MqttPublishItemsQueued);
 }
 
+/// @brief Add the specified command to the last entry in the queue.
+/// @param command 
+void MQTT_InvokeCommandAtEnd(PostPublishCommands command) {
+	MqttPublishItem_t* tail = get_queue_tail(g_MqttPublishQueueHead);
+	if (tail == NULL){
+		addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, "InvokeCommandAtEnd invoked but queue is empty");
+	}
+	else {
+		tail->command = command;
+	}
+}
+
 /// @brief Queue an entry for publish.
 /// @param topic 
 /// @param channel 
 /// @param value 
 /// @param flags
-void MQTT_QueuePublish(char* topic, char* channel, char* value, int flags) {
+void MQTT_QueuePublish(const char* topic, const char* channel, const char* value, int flags) {
 	MQTT_QueuePublishWithCommand(topic, channel, value, flags, None);
 }
 
@@ -1482,10 +2172,10 @@ OBK_Publish_Result PublishQueuedItems() {
 			case None:
 				break;
 			case PublishAll:
-				CMD_ExecuteCommand(MQTT_COMMAND_PUBLISH_ALL, COMMAND_FLAG_SOURCE_MQTT);
+				MQTT_PublishWholeDeviceState_Internal(true);
 				break;
 			case PublishChannels:
-				CMD_ExecuteCommand(MQTT_COMMAND_PUBLISH_CHANNELS, COMMAND_FLAG_SOURCE_MQTT);
+				MQTT_PublishOnlyDeviceChannelsIfPossible();
 				break;
 			}
 		}
@@ -1503,6 +2193,12 @@ OBK_Publish_Result PublishQueuedItems() {
 /// @brief Is MQTT sub system ready and connected?
 /// @return 
 bool MQTT_IsReady() {
-	return mqtt_client && mqtt_client_is_connected(mqtt_client);
+	int res = 0;
+	if (mqtt_client){
+		LOCK_TCPIP_CORE();
+		res = mqtt_client_is_connected(mqtt_client);
+		UNLOCK_TCPIP_CORE();
+	}
+	return mqtt_client && res;
 }
 

@@ -29,20 +29,27 @@ extern const char* sensor_mqtt_device_classes[];
 extern const char* sensor_mqtt_device_units[];
 extern const char* counter_mqttNames[];
 extern const char* counter_devClasses[];
+extern int g_dhtsCount;
 
 void DRV_Generic_Init();
 void DRV_AppendInformationToHTTPIndexPage(http_request_t* request);
 void DRV_OnEverySecond();
+void DHT_OnEverySecond();
+void DHT_OnPinsConfigChanged();
 void DRV_RunQuickTick();
 void DRV_StartDriver(const char* name);
 void DRV_StopDriver(const char* name);
+// right now only used by simulator
+void DRV_ShutdownAllDrivers();
 bool DRV_IsRunning(const char* name);
 void DRV_OnChannelChanged(int channel, int iVal);
-void SM2135_Write(byte* rgbcw);
-void BP5758D_Write(byte* rgbcw);
-void BP1658CJ_Write(byte* rgbcw);
+void SM2135_Write(float* rgbcw);
+void BP5758D_Write(float* rgbcw);
+void BP1658CJ_Write(float* rgbcw);
+void SM2235_Write(float *rgbcw);
 void DRV_DGR_OnLedDimmerChange(int iVal);
 void DRV_DGR_OnLedEnableAllChange(int iVal);
+void DRV_DGR_OnLedFinalColorsChange(byte rgbcw[5]);
 
 // OBK_POWER etc
 float DRV_GetReading(int type);

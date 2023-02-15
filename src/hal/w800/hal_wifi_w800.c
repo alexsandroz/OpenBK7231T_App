@@ -12,7 +12,8 @@
 
 static void (*g_wifiStatusCallback)(int code);
 
-static char g_IP[3 + 3 + 3 + 3 + 1 + 1 + 1] = "unknown";
+// lenght of "192.168.103.103" is 15 but we also need a NULL terminating character
+static char g_IP[32] = "unknown";
 static int g_bOpenAccessPointMode = 0;
 
 const char* security_names[] = {
@@ -155,7 +156,10 @@ static int connect_wifi_demo(char* ssid, char* pwd)
 
 	tls_wifi_disconnect();
 	tls_wifi_softap_destroy();
+
+	#if defined(PLATFORM_W800)
 	tls_wifi_set_oneshot_flag(0);
+	#endif
 
 	tls_param_get(TLS_PARAM_ID_WPROTOCOL, (void*)&wireless_protocol, TRUE);
 	if (TLS_PARAM_IEEE80211_INFRA != wireless_protocol)
@@ -254,7 +258,9 @@ int demo_create_softap(u8* ssid, u8* key, int chan, int encrypt, int format)
 		tls_param_set(TLS_PARAM_ID_WPROTOCOL, (void*)&wireless_protocol, FALSE);
 	}
 
+	#if defined(PLATFORM_W800)
 	tls_wifi_set_oneshot_flag(0); /*disable oneshot*/
+	#endif
 
 	tls_param_get(TLS_PARAM_ID_BRDSSID, (void*)&ssid_set, (bool)0);
 	if (0 == ssid_set)

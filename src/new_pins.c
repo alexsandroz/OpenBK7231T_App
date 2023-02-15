@@ -3,6 +3,7 @@
 
 #include "new_common.h"
 #include "new_pins.h"
+#include "quicktick.h"
 #include "new_cfg.h"
 #include "httpserver/new_http.h"
 #include "logging/logging.h"
@@ -16,22 +17,21 @@
 #include "hal/hal_pins.h"
 #include "hal/hal_adc.h"
 
-
-//According to your need to modify the constants.
-#define PIN_TMR_DURATION      5 // Delay (in ms) between button scan iterations
-#define BTN_DEBOUNCE_TICKS    3	//MAX 8
-
-//#define BTN_SHORT_TICKS       (300 / PIN_TMR_DURATION)
-//#define BTN_LONG_TICKS        (1000 / PIN_TMR_DURATION)
-//#define BTN_HOLD_REPEAT_TICKS  (500 / PIN_TMR_DURATION)
-// Now they are adjustable in CFG
-int BTN_SHORT_TICKS;
-int BTN_LONG_TICKS;
-int BTN_HOLD_REPEAT_TICKS;
+#ifdef PLATFORM_BEKEN
+#include <gpio_pub.h>
+#include "driver/drv_ir.h"
+#endif
 
 
-#define WIFI_LED_FAST_BLINK_DURATION 250
-#define WIFI_LED_SLOW_BLINK_DURATION 500
+// According to your need to modify the constants.
+#define PIN_TMR_DURATION      QUICK_TMR_DURATION // Delay (in ms) between button scan iterations
+#define BTN_DEBOUNCE_MS    		15	//MAX 8*5
+
+// loaded from config, they are now configurable
+int BTN_SHORT_MS;
+int BTN_LONG_MS;
+int BTN_HOLD_REPEAT_MS;
+
 
 typedef enum {
 	BTN_PRESS_DOWN = 0,
@@ -41,12 +41,11 @@ typedef enum {
 	BTN_DOUBLE_CLICK,
 	BTN_LONG_RRESS_START,
 	BTN_LONG_PRESS_HOLD,
+	BTN_TRIPLE_CLICK,
+	BTN_QUADRUPLE_CLICK,
 	BTN_number_of_event,
 	BTN_NONE_PRESS
 }BTN_PRESS_EVT;
-
-
-typedef void (*new_btn_callback)(void*);
 
 typedef struct pinButton_ {
 	uint16_t ticks;
@@ -54,12 +53,12 @@ typedef struct pinButton_ {
 	uint8_t  repeat : 4;
 	uint8_t  event : 4;
 	uint8_t  state : 3;
-	uint8_t  debounce_cnt : 3;
 	uint8_t  active_level : 1;
 	uint8_t  button_level : 1;
 
+	uint8_t  debounce_cnt; // make a full byte, so we can count ms
+	
 	uint8_t  (*hal_button_Level)(void *self);
-	new_btn_callback  cb[BTN_number_of_event];
 }pinButton_s;
 
 // overall pins enable.
@@ -69,14 +68,79 @@ char g_enable_pins = 0;
 // it was nice to have it as bits but now that we support PWM...
 //int g_channelStates;
 int g_channelValues[CHANNEL_MAX] = { 0 };
+float g_channelValuesFloats[CHANNEL_MAX] = { 0 };
 
 pinButton_s g_buttons[PLATFORM_GPIO_MAX];
 
 void (*g_doubleClickCallback)(int pinIndex) = 0;
 
-static byte g_timesDown[PLATFORM_GPIO_MAX];
-static byte g_timesUp[PLATFORM_GPIO_MAX];
+static short g_times[PLATFORM_GPIO_MAX];
+static short g_times2[PLATFORM_GPIO_MAX];
 static byte g_lastValidState[PLATFORM_GPIO_MAX];
+
+
+// a bitfield indicating which GPI are inputs.
+// could be used to control edge triggered interrupts...
+/*  @param  gpio_index_map:The gpio bitmap which set 1 enable wakeup deep sleep.
+ *              gpio_index_map is hex and every bits is map to gpio0-gpio31.
+ *          gpio_edge_map:The gpio edge bitmap for wakeup gpios,
+ *              gpio_edge_map is hex and every bits is map to gpio0-gpio31.
+ *              0:rising,1:falling.
+ */
+// these map directly to void bk_enter_deep_sleep(uint32_t gpio_index_map,uint32_t gpio_edge_map);
+uint32_t g_gpio_index_map = 0;
+uint32_t g_gpio_edge_map = 0; // note: 0->rising, 1->falling
+
+
+void PINS_BeginDeepSleepWithPinWakeUp() {
+#ifdef PLATFORM_BK7231T
+	bk_enter_deep_sleep(g_gpio_index_map, g_gpio_edge_map);
+#else
+
+#endif
+}
+void setGPIActive(int index, int active, int falling){
+	if (active){
+		g_gpio_index_map |= (1<<index);
+	} else {
+		g_gpio_index_map &= ~(1<<index);
+	}
+	if (falling){
+		g_gpio_edge_map |= (1<<index);
+	} else {
+		g_gpio_edge_map &= ~(1<<index);
+	}
+}
+
+
+#ifdef PLATFORM_BEKEN
+#ifdef BEKEN_PIN_GPI_INTERRUPTS
+	// TODO: EXAMPLE of edge based interrupt handling
+	// NOT YET ENABLED
+
+	// this will be from hal_bk....
+	// causes button read.
+	extern void BUTTON_TriggerRead();
+
+
+	// NOTE: ISR!!!!
+	// triggers one-shot timer to fire in 1ms
+	// from hal_main_bk7231.c
+	// THIS IS AN ISR.
+	void PIN_IntHandler(unsigned char index){
+		BUTTON_TriggerRead();
+	}
+
+	// this will be from hal_bk....
+	// ensures that we will get called in 50ms or less.
+	extern void BUTTON_TriggerRead_quick();
+
+	// called in PIN_ticks to carry on polling for 20 polls after last button is active
+	void PIN_TriggerPoll(){
+		BUTTON_TriggerRead_quick();
+	}
+#endif
+#endif
 
 
 void PIN_SetupPins() {
@@ -84,6 +148,33 @@ void PIN_SetupPins() {
 	for(i = 0; i < PLATFORM_GPIO_MAX; i++) {
 		PIN_SetPinRoleForPinIndex(i,g_cfg.pins.roles[i]);
 	}
+
+#ifdef PLATFORM_BEKEN
+#ifdef BEKEN_PIN_GPI_INTERRUPTS
+	// TODO: EXAMPLE of edge based interrupt handling
+	// NOT YET ENABLED
+	for (int i = 0; i < 32; i++){
+		if (g_gpio_index_map & (1<<i)){
+			uint32_t mode = GPIO_INT_LEVEL_RISING;
+			if (g_gpio_edge_map & (1<<i)){
+				mode = GPIO_INT_LEVEL_FALLING;
+			}
+			if (g_cfg.pins.roles[i] == IOR_IRRecv){
+				// not yet implemented
+				//gpio_int_enable(i, mode, IR_GPI_IntHandler);
+			} else {
+				gpio_int_enable(i, mode, PIN_IntHandler);
+			}
+		} else {
+			gpio_int_disable(i);
+		}
+	}
+#endif
+#endif
+#if defined(PLATFORM_BEKEN) || defined(PLATFORM_BL602) || defined(PLATFORM_W600) || defined(WINDOWS)
+	// TODO: better place to call?
+	DHT_OnPinsConfigChanged();
+#endif
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL,"PIN_SetupPins pins have been set up.\r\n");
 }
 
@@ -154,7 +245,8 @@ void Button_OnPressRelease(int index) {
 }
 void Button_OnInitialPressDown(int index) 
 {
-	//addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL,"%i Button_OnInitialPressDown\r\n", index);
+	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL,"%i Button_OnInitialPressDown\r\n", index);
+	EventHandlers_FireEvent(CMD_EVENT_PIN_ONPRESS, index);
 	
 	// so-called SetOption13 - instant reaction to touch instead of waiting for release
 	if(CFG_HasFlag(OBK_FLAG_BTN_INSTANTTOUCH)) {
@@ -171,6 +263,16 @@ void Button_OnInitialPressDown(int index)
 		if(g_cfg.pins.roles[index] == IOR_Button_NextDimmer || g_cfg.pins.roles[index] == IOR_Button_NextDimmer_n)
 		{
 		
+			return;
+		}
+		if (g_cfg.pins.roles[index] == IOR_Button_NextTemperature || g_cfg.pins.roles[index] == IOR_Button_NextTemperature_n)
+		{
+
+			return;
+		}
+		if (g_cfg.pins.roles[index] == IOR_Button_ScriptOnly || g_cfg.pins.roles[index] == IOR_Button_ScriptOnly_n)
+		{
+
 			return;
 		}
 		// is it a device with RGB/CW/single color/etc LED driver?
@@ -204,6 +306,14 @@ void Button_OnShortClick(int index)
 		{
 			return;
 		}
+		if (g_cfg.pins.roles[index] == IOR_Button_NextTemperature || g_cfg.pins.roles[index] == IOR_Button_NextTemperature_n)
+		{
+			return;
+		}
+		if (g_cfg.pins.roles[index] == IOR_Button_ScriptOnly || g_cfg.pins.roles[index] == IOR_Button_ScriptOnly_n)
+		{
+			return;
+		}
 		// is it a device with RGB/CW/single color/etc LED driver?
 		if(LED_IsRunningDriver()) {
 			LED_ToggleEnabled();
@@ -223,12 +333,28 @@ void Button_OnDoubleClick(int index)
 	}
 	// fire event - button on pin <index> was dbclicked
 	EventHandlers_FireEvent(CMD_EVENT_PIN_ONDBLCLICK,index);
-	// double click toggles SECOND CHANNEL linked to this button
-	CHANNEL_Toggle(g_cfg.pins.channels2[index]);
+
+	if (g_cfg.pins.roles[index] == IOR_Button || g_cfg.pins.roles[index] == IOR_Button_n)
+	{
+		// double click toggles SECOND CHANNEL linked to this button
+		CHANNEL_Toggle(g_cfg.pins.channels2[index]);
+	}
 
 	if(g_doubleClickCallback!=0) {
 		g_doubleClickCallback(index);
 	}
+}
+void Button_OnTripleClick(int index)
+{
+	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "%i key_triple_press\r\n", index);
+	// fire event - button on pin <index> was 3clicked
+	EventHandlers_FireEvent(CMD_EVENT_PIN_ON3CLICK, index);
+}
+void Button_OnQuadrupleClick(int index)
+{
+	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "%i key_quadruple_press\r\n", index);
+	// fire event - button on pin <index> was 4clicked
+	EventHandlers_FireEvent(CMD_EVENT_PIN_ON4CLICK, index);
 }
 void Button_OnLongPressHold(int index) {
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL,"%i Button_OnLongPressHold\r\n", index);
@@ -237,6 +363,9 @@ void Button_OnLongPressHold(int index) {
 
 	if(g_cfg.pins.roles[index] == IOR_Button_NextDimmer || g_cfg.pins.roles[index] == IOR_Button_NextDimmer_n){
 		LED_NextDimmerHold();
+	}
+	if (g_cfg.pins.roles[index] == IOR_Button_NextTemperature || g_cfg.pins.roles[index] == IOR_Button_NextTemperature_n) {
+		LED_NextTemperatureHold();
 	}
 }
 void Button_OnLongPressHoldStart(int index) {
@@ -252,7 +381,8 @@ bool BTN_ShouldInvert(int index) {
 	}
 	if(g_cfg.pins.roles[index] == IOR_Button_n || g_cfg.pins.roles[index] == IOR_Button_ToggleAll_n||
 		g_cfg.pins.roles[index] == IOR_DigitalInput_n || 	g_cfg.pins.roles[index] == IOR_DigitalInput_NoPup_n
-		 || 	g_cfg.pins.roles[index] == IOR_Button_NextColor_n  || 	g_cfg.pins.roles[index] == IOR_Button_NextDimmer_n) {
+		 || 	g_cfg.pins.roles[index] == IOR_Button_NextColor_n  || 	g_cfg.pins.roles[index] == IOR_Button_NextDimmer_n
+		|| g_cfg.pins.roles[index] == IOR_Button_NextTemperature_n || g_cfg.pins.roles[index] == IOR_Button_ScriptOnly_n) {
 		return true;
 	}
 	return false;
@@ -318,6 +448,10 @@ void CHANNEL_SetAll(int iVal, int iFlags) {
 		case IOR_Button_NextColor_n:
 		case IOR_Button_NextDimmer:
 		case IOR_Button_NextDimmer_n:
+		case IOR_Button_NextTemperature:
+		case IOR_Button_NextTemperature_n:
+		case IOR_Button_ScriptOnly:
+		case IOR_Button_ScriptOnly_n:
 			{
 
 			}
@@ -332,6 +466,10 @@ void CHANNEL_SetAll(int iVal, int iFlags) {
 		case IOR_PWM_n:
 			CHANNEL_Set(g_cfg.pins.channels[i],iVal,iFlags);
 			break;
+        case IOR_BridgeForward:
+        case IOR_BridgeReverse:
+            CHANNEL_Set(g_cfg.pins.channels[i],iVal,iFlags);
+            break;
 
 		default:
 			break;
@@ -386,6 +524,8 @@ void CHANNEL_DoSpecialToggleAll() {
 
 }
 void PIN_SetPinRoleForPinIndex(int index, int role) {
+	bool bDHTChange = false;
+
 	if(index < 0 || index >= PLATFORM_GPIO_MAX) {
 		addLogAdv(LOG_ERROR, LOG_FEATURE_CFG, "PIN_SetPinRoleForPinIndex: Pin index %i out of range <0,%i).",index,PLATFORM_GPIO_MAX);
 		return;
@@ -409,6 +549,10 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 	}
 #endif
 	if (g_enable_pins) {
+
+		// remove from active inputs
+		setGPIActive(index, 0, 0);
+
 		switch(g_cfg.pins.roles[index])
 		{
 		case IOR_Button:
@@ -419,6 +563,10 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 		case IOR_Button_NextColor_n:
 		case IOR_Button_NextDimmer:
 		case IOR_Button_NextDimmer_n:
+		case IOR_Button_NextTemperature:
+		case IOR_Button_NextTemperature_n:
+		case IOR_Button_ScriptOnly:
+		case IOR_Button_ScriptOnly_n:
 			{
 				//pinButton_s *bt = &g_buttons[index];
 				// TODO: disable button
@@ -442,6 +590,9 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 		case IOR_ADC:
 			// TODO: disable?
 			break;
+        case IOR_BridgeForward:
+        case IOR_BridgeReverse:
+            break;
 
 		default:
 			break;
@@ -449,24 +600,45 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 	}
 	// set new role
 	if(g_cfg.pins.roles[index] != role) {
+		if (g_enable_pins) {
+			// if old role is DHT
+			if (IS_PIN_DHT_ROLE(g_cfg.pins.roles[index])) {
+				bDHTChange = true;
+			}
+			// or new role is DHT
+			if (IS_PIN_DHT_ROLE(role)) {
+				bDHTChange = true;
+			}
+		}
 		g_cfg.pins.roles[index] = role;
 		g_cfg_pendingChanges++;
 	}
 
 	if (g_enable_pins) {
+		int falling = 0;
+
 		// init new role
 		switch(role)
 		{
 		case IOR_Button:
-		case IOR_Button_n:
         case IOR_Button_ToggleAll:
-		case IOR_Button_ToggleAll_n:
 		case IOR_Button_NextColor:
-		case IOR_Button_NextColor_n:
 		case IOR_Button_NextDimmer:
+		case IOR_Button_NextTemperature:
+		case IOR_Button_ScriptOnly:
+			falling = 1;
+
+		case IOR_Button_n:
+		case IOR_Button_ToggleAll_n:
+		case IOR_Button_NextColor_n:
 		case IOR_Button_NextDimmer_n:
+		case IOR_Button_NextTemperature_n:
+		case IOR_Button_ScriptOnly_n:
 			{
 				pinButton_s *bt = &g_buttons[index];
+
+				// add to active inputs
+				setGPIActive(index, 1, falling);
 
 				// digital input
 				HAL_PIN_Setup_Input_Pullup(index);
@@ -475,24 +647,42 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 				NEW_button_init(bt, button_generic_get_gpio_value, 0);
 			}
 			break;
+
+		case IOR_IRRecv:
+			falling = 1;
+			// add to active inputs
+			setGPIActive(index, 1, falling);
+			break;
+
 		case IOR_ToggleChannelOnToggle:
 			{
+				// add to active inputs
+				falling = 1;
+				setGPIActive(index, 1, falling);
+
 				// digital input
 				HAL_PIN_Setup_Input_Pullup(index);
 				// otherwise we get a toggle on start
 				g_lastValidState[index] = PIN_ReadDigitalInputValue_WithInversionIncluded(index);
 			}
 			break;
-		case IOR_DigitalInput:
 		case IOR_DigitalInput_n:
+			falling = 1;
+		case IOR_DigitalInput:
 			{
+				// add to active inputs
+				setGPIActive(index, 1, falling);
 				// digital input
 				HAL_PIN_Setup_Input_Pullup(index);
 			}
 			break;
-		case IOR_DigitalInput_NoPup:
 		case IOR_DigitalInput_NoPup_n:
+			falling = 1;
+		case IOR_DigitalInput_NoPup:
 			{
+				// add to active inputs
+				// TODO: We cannot set active here, as later code may enforce pullup/down????
+				//setGPIActive(index, 1, falling);
 				// digital input
 				HAL_PIN_Setup_Input(index);
 			}
@@ -516,6 +706,20 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 				}
 			}
 			break;
+        case IOR_BridgeForward:
+        case IOR_BridgeReverse:
+            {
+                int channelIndex;
+                int channelValue;
+
+                channelIndex = PIN_GetPinChannelForPinIndex(index);
+                channelValue = g_channelValues[channelIndex];
+
+                HAL_PIN_Setup_Output(index);
+                HAL_PIN_SetOutputValue(index,0);
+            }
+            break;
+
 		case IOR_AlwaysHigh:
 			{
 				HAL_PIN_Setup_Output(index);
@@ -542,10 +746,10 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 		case IOR_PWM:
 			{
 				int channelIndex;
-				int channelValue;
+				float channelValue;
 
 				channelIndex = PIN_GetPinChannelForPinIndex(index);
-				channelValue = g_channelValues[channelIndex];
+				channelValue = g_channelValuesFloats[channelIndex];
 				HAL_PIN_PWM_Start(index);
 
 				if(role == IOR_PWM_n) {
@@ -561,6 +765,12 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 			break;
 		}
 	}
+	if (bDHTChange) {
+#if defined(PLATFORM_BEKEN) || defined(PLATFORM_BL602) || defined(PLATFORM_W600) || defined(WINDOWS)
+		// TODO: better place to call?
+		DHT_OnPinsConfigChanged();
+#endif
+	}
 }
 
 void PIN_SetGenericDoubleClickCallback(void (*cb)(int pinIndex)) {
@@ -569,7 +779,11 @@ void PIN_SetGenericDoubleClickCallback(void (*cb)(int pinIndex)) {
 void Channel_SaveInFlashIfNeeded(int ch) {
 	// save, if marked as save value in flash (-1)
 	if(g_cfg.startChannelValues[ch] == -1) {
+		//addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Channel_SaveInFlashIfNeeded: Channel %i is being saved to flash, state %i", ch, g_channelValues[ch]);
 		HAL_FlashVars_SaveChannel(ch,g_channelValues[ch]);
+	}
+	else {
+		//addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Channel_SaveInFlashIfNeeded: Channel %i is not saved to flash, state %i", ch, g_channelValues[ch]);
 	}
 }
 static void Channel_OnChanged(int ch, int prevValue, int iFlags) {
@@ -581,13 +795,18 @@ static void Channel_OnChanged(int ch, int prevValue, int iFlags) {
 
 	//bOn = BIT_CHECK(g_channelStates,ch);
 	iVal = g_channelValues[ch];
+	g_channelValuesFloats[ch] = (float)iVal;
 	bOn = iVal > 0;
 
-#ifndef OBK_DISABLE_ALL_DRIVERS
-#if DRV_ENABLE_I2C
+#if ENABLE_I2C
 	I2C_OnChannelChanged(ch,iVal);
 #endif
+
+#ifndef OBK_DISABLE_ALL_DRIVERS
 	DRV_OnChannelChanged(ch,iVal);
+#endif
+
+#if ENABLE_DRIVER_TUYAMCU
 	TuyaMCU_OnChannelChanged(ch, iVal);
 #endif
 
@@ -616,6 +835,15 @@ static void Channel_OnChanged(int ch, int prevValue, int iFlags) {
 				HAL_PIN_PWM_Update(i,100-iVal);
 				bCallCb = 1;
 			}
+			else if(IS_PIN_DHT_ROLE(g_cfg.pins.roles[i])) {
+				bCallCb = 1;
+			}
+		}
+		else if(g_cfg.pins.channels2[i] == ch) {
+			//DHT setup uses 2 channels
+			if(IS_PIN_DHT_ROLE(g_cfg.pins.roles[i])) {
+				bCallCb = 1;
+			}
 		}
 	}
 	if(g_cfg.pins.channelTypes[ch] != ChType_Default) {
@@ -642,10 +870,19 @@ void CFG_ApplyChannelStartValues() {
 		iValue = g_cfg.startChannelValues[i];
 		if(iValue == -1) {
 			g_channelValues[i] = HAL_FlashVars_GetChannelValue(i);
+			//addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "CFG_ApplyChannelStartValues: Channel %i is being set to REMEMBERED state %i", i, g_channelValues[i]);
 		} else {
 			g_channelValues[i] = iValue;
+			//addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "CFG_ApplyChannelStartValues: Channel %i is being set to constant state %i", i, g_channelValues[i]);
 		}
 	}
+}
+float CHANNEL_GetFloat(int ch) {
+	if (ch < 0 || ch >= CHANNEL_MAX) {
+		addLogAdv(LOG_ERROR, LOG_FEATURE_GENERAL, "CHANNEL_Get: Channel index %i is out of range <0,%i)\n\r", ch, CHANNEL_MAX);
+		return 0;
+	}
+	return g_channelValuesFloats[ch];
 }
 int CHANNEL_Get(int ch) {
 	if(ch < 0 || ch >= CHANNEL_MAX) {
@@ -662,6 +899,23 @@ void CHANNEL_ClearAllChannels() {
 	}
 }
 
+void CHANNEL_Set_FloatPWM(int ch, float fVal, int iFlags) {
+	int i;
+
+	g_channelValues[ch] = (int)fVal;
+	g_channelValuesFloats[ch] = fVal;
+
+	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
+		if (g_cfg.pins.channels[i] == ch) {
+			if (g_cfg.pins.roles[i] == IOR_PWM) {
+				HAL_PIN_PWM_Update(i, fVal);
+			}
+			else if (g_cfg.pins.roles[i] == IOR_PWM_n) {
+				HAL_PIN_PWM_Update(i, 100.0f - fVal);
+			}
+		}
+	}
+}
 void CHANNEL_Set(int ch, int iVal, int iFlags) {
 	int prevValue;
 	int bForce;
@@ -704,7 +958,7 @@ void CHANNEL_Set(int ch, int iVal, int iFlags) {
 
 	Channel_OnChanged(ch,prevValue,iFlags);
 }
-void CHANNEL_AddClamped(int ch, int iVal, int min, int max) {
+void CHANNEL_AddClamped(int ch, int iVal, int min, int max, int bWrapInsteadOfClamp) {
 	int prevValue;
 	if(ch < 0 || ch >= CHANNEL_MAX) {
 		addLogAdv(LOG_ERROR, LOG_FEATURE_GENERAL,"CHANNEL_AddClamped: Channel index %i is out of range <0,%i)\n\r",ch,CHANNEL_MAX);
@@ -713,10 +967,18 @@ void CHANNEL_AddClamped(int ch, int iVal, int min, int max) {
 	prevValue = g_channelValues[ch];
 	g_channelValues[ch] = g_channelValues[ch] + iVal;
 
-	if(g_channelValues[ch]>max)
-		g_channelValues[ch] = max;
-	if(g_channelValues[ch]<min)
-		g_channelValues[ch] = min;
+	if (bWrapInsteadOfClamp) {
+		if (g_channelValues[ch] > max)
+			g_channelValues[ch] = min;
+		if (g_channelValues[ch] < min)
+			g_channelValues[ch] = max;
+	}
+	else {
+		if (g_channelValues[ch] > max)
+			g_channelValues[ch] = max;
+		if (g_channelValues[ch] < min)
+			g_channelValues[ch] = min;
+	}
 
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL,"CHANNEL_AddClamped channel %i has changed to %i\n\r",ch,g_channelValues[ch]);
 
@@ -833,8 +1095,11 @@ bool CHANNEL_IsInUse(int ch) {
 	}
 
 	for(i = 0; i < PLATFORM_GPIO_MAX; i++){
-		if(g_cfg.pins.roles[i] != IOR_None){
-				if(g_cfg.pins.channels[i] == ch) {
+		if(g_cfg.pins.roles[i] != IOR_None) {
+			if(g_cfg.pins.channels[i] == ch) {
+				return true;
+			}
+			if (g_cfg.pins.channels2[i] == ch) {
 				return true;
 			}
 		}
@@ -843,8 +1108,44 @@ bool CHANNEL_IsInUse(int ch) {
 }
 
 
-bool CHANNEL_HasChannelSomeOutputPin(int ch) {
-	return CHANNEL_GetRoleForOutputChannel(ch) != IOR_None;
+bool CHANNEL_IsPowerRelayChannel(int ch) {
+	int i;
+	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
+		if (g_cfg.pins.channels[i] == ch) {
+			int role = g_cfg.pins.roles[i];	if (role == IOR_Relay || role == IOR_Relay_n) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+bool CHANNEL_HasRoleThatShouldBePublished(int ch) {
+	int i;
+	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
+		int role = g_cfg.pins.roles[i];	
+
+		if (g_cfg.pins.channels[i] == ch) {
+			if (role == IOR_Relay || role == IOR_Relay_n
+				|| role == IOR_LED || role == IOR_LED_n
+				|| role == IOR_ADC
+				|| role == IOR_CHT8305_DAT || role == IOR_SHT3X_DAT 
+				|| role == IOR_DigitalInput || role == IOR_DigitalInput_n
+				|| IS_PIN_DHT_ROLE(role)
+				|| role == IOR_DigitalInput_NoPup || role == IOR_DigitalInput_NoPup_n) {
+				return true;
+			}
+		}
+		else if (g_cfg.pins.channels2[i] == ch) {
+			if (IS_PIN_DHT_ROLE(role)) {
+				return true;
+			}
+			// CHT8305 and SHT3X uses secondary channel for humidity
+			if (role == IOR_CHT8305_DAT || role == IOR_SHT3X_DAT) {
+				return true;
+			}
+		}
+	}
+	return false;
 }
 int CHANNEL_GetRoleForOutputChannel(int ch){
 	int i;
@@ -858,8 +1159,10 @@ int CHANNEL_GetRoleForOutputChannel(int ch){
 				case IOR_PWM_n:
 				case IOR_PWM:
 					return g_cfg.pins.roles[i];
-					break;
-				case IOR_Button:
+                case IOR_BridgeForward:
+                case IOR_BridgeReverse:
+                    return g_cfg.pins.roles[i];
+                case IOR_Button:
 				case IOR_Button_n:
 				case IOR_LED_WIFI:
 				case IOR_LED_WIFI_n:
@@ -871,13 +1174,13 @@ int CHANNEL_GetRoleForOutputChannel(int ch){
 }
 
 
-#define EVENT_CB(ev)   if(handle->cb[ev])handle->cb[ev]((pinButton_s*)handle)
+#define EVENT_CB(ev)   
 
 #define PIN_TMR_LOOPS_PER_SECOND (1000/PIN_TMR_DURATION)
 #define ADC_SAMPLING_TICK_COUNT PIN_TMR_LOOPS_PER_SECOND
 
 
-void PIN_Input_Handler(int pinIndex)
+void PIN_Input_Handler(int pinIndex, uint32_t ms_since_last)
 {
 	pinButton_s *handle;
 	uint8_t read_gpio_level;
@@ -891,12 +1194,14 @@ void PIN_Input_Handler(int pinIndex)
 
 	//ticks counter working..
 	if((handle->state) > 0)
-		handle->ticks++;
+		handle->ticks += ms_since_last;
 
 	/*------------button debounce handle---------------*/
 	if(read_gpio_level != handle->button_level) { //not equal to prev one
 		//continue read 3 times same new level change
-		if(++(handle->debounce_cnt) >= BTN_DEBOUNCE_TICKS) {
+		handle->debounce_cnt += ms_since_last;
+
+		if(handle->debounce_cnt >= BTN_DEBOUNCE_MS) {
 			handle->button_level = read_gpio_level;
 			handle->debounce_cnt = 0;
 		}
@@ -906,7 +1211,7 @@ void PIN_Input_Handler(int pinIndex)
 
 	/*-----------------State machine-------------------*/
 	switch (handle->state) {
-	case 0:
+	case 0: 
 		if(handle->button_level == handle->active_level) {	//start press down
 			handle->event = (uint8_t)BTN_PRESS_DOWN;
 			EVENT_CB(BTN_PRESS_DOWN);
@@ -927,7 +1232,7 @@ void PIN_Input_Handler(int pinIndex)
 			handle->ticks = 0;
 			handle->state = 2;
 
-		} else if(handle->ticks > BTN_LONG_TICKS) {
+		} else if(handle->ticks > BTN_LONG_MS) {
 			handle->event = (uint8_t)BTN_LONG_RRESS_START;
 			Button_OnLongPressHoldStart(pinIndex);
 			EVENT_CB(BTN_LONG_RRESS_START);
@@ -940,20 +1245,27 @@ void PIN_Input_Handler(int pinIndex)
 			handle->event = (uint8_t)BTN_PRESS_DOWN;
 			EVENT_CB(BTN_PRESS_DOWN);
 			handle->repeat++;
-			if(handle->repeat == 2) {
-				EVENT_CB(BTN_DOUBLE_CLICK); // repeat hit
-				Button_OnDoubleClick(pinIndex);
-			}
+			//if(handle->repeat == 2) {
+			//	EVENT_CB(BTN_DOUBLE_CLICK); // repeat hit
+			//	Button_OnDoubleClick(pinIndex);
+			//}
 			EVENT_CB(BTN_PRESS_REPEAT); // repeat hit
 			handle->ticks = 0;
 			handle->state = 3;
-		} else if(handle->ticks > BTN_SHORT_TICKS) { //released timeout
+		} else if(handle->ticks > BTN_SHORT_MS) { //released timeout
 			if(handle->repeat == 1) {
 				handle->event = (uint8_t)BTN_SINGLE_CLICK;
 				EVENT_CB(BTN_SINGLE_CLICK);
 				Button_OnShortClick(pinIndex);
 			} else if(handle->repeat == 2) {
 				handle->event = (uint8_t)BTN_DOUBLE_CLICK;
+				Button_OnDoubleClick(pinIndex);
+			} else if (handle->repeat == 3) {
+				handle->event = (uint8_t)BTN_TRIPLE_CLICK;
+				Button_OnTripleClick(pinIndex);
+			} else if (handle->repeat == 4) {
+				handle->event = (uint8_t)BTN_QUADRUPLE_CLICK;
+				Button_OnQuadrupleClick(pinIndex);
 			}
 			handle->state = 0;
 		}
@@ -964,7 +1276,7 @@ void PIN_Input_Handler(int pinIndex)
 			handle->event = (uint8_t)BTN_PRESS_UP;
 			EVENT_CB(BTN_PRESS_UP);
 			Button_OnPressRelease(pinIndex);
-			if(handle->ticks < BTN_SHORT_TICKS) {
+			if(handle->ticks < BTN_SHORT_MS) {
 				handle->ticks = 0;
 				handle->state = 2; //repeat press
 			} else {
@@ -977,8 +1289,8 @@ void PIN_Input_Handler(int pinIndex)
 		if(handle->button_level == handle->active_level) {
 			//continue hold trigger
 			handle->event = (uint8_t)BTN_LONG_PRESS_HOLD;
-			handle->holdRepeatTicks ++;
-			if(handle->holdRepeatTicks > BTN_HOLD_REPEAT_TICKS) {
+			handle->holdRepeatTicks += ms_since_last;
+			if(handle->holdRepeatTicks > BTN_HOLD_REPEAT_MS) {
 				Button_OnLongPressHold(pinIndex);
 				handle->holdRepeatTicks = 0;
 			}
@@ -993,8 +1305,7 @@ void PIN_Input_Handler(int pinIndex)
 	}
 }
 
-
-static void PIN_set_wifi_led(int value){
+void PIN_set_wifi_led(int value){
 	int i;
 	for ( i = 0; i < PLATFORM_GPIO_MAX; i++){
 		if (g_cfg.pins.roles[i] == IOR_LED_WIFI){
@@ -1006,141 +1317,181 @@ static void PIN_set_wifi_led(int value){
 	}
 }
 
+static uint32_t g_time = 0;
+static uint32_t g_last_time = 0;
+static int activepoll_time = 0; // time to keep polling active until
 
-static int g_wifiLedToggleTime = 0;
-static int g_wifi_ledState = 0;
-#define TOGGLE_PIN_DEBOUNCE_CYCLES 50
 //  background ticks, timer repeat invoking interval defined by PIN_TMR_DURATION.
 void PIN_ticks(void *param)
 {
 	int i;
 	int value;
 
-	BTN_SHORT_TICKS = (g_cfg.buttonShortPress * 100 / PIN_TMR_DURATION);
-	BTN_LONG_TICKS = (g_cfg.buttonLongPress * 100 / PIN_TMR_DURATION);
-	BTN_HOLD_REPEAT_TICKS = (g_cfg.buttonHoldRepeat * 100 / PIN_TMR_DURATION);
+#if defined(PLATFORM_BEKEN) || defined(WINDOWS)
+	g_time = rtos_get_time();
+#else
+	g_time += PIN_TMR_DURATION;
+#endif
+	uint32_t t_diff = g_time - g_last_time;
+	// cope with wrap
+	if (t_diff > 0x4000){
+		t_diff = ((g_time + 0x4000) - (g_last_time + 0x4000));
+	}
+	g_last_time = g_time;
 
-#if (defined WINDOWS) || (defined PLATFORM_BEKEN)
-	SVM_RunThreads(PIN_TMR_DURATION);
-#endif
-#ifndef OBK_DISABLE_ALL_DRIVERS
-	DRV_RunQuickTick();
-#endif
-#ifdef WINDOWS
-	NewTuyaMCUSimulator_RunQuickTick(PIN_TMR_DURATION);
-#endif
-	
-	if(CFG_HasFlag(OBK_FLAG_LED_SMOOTH_TRANSITIONS) == true) {
-		LED_RunQuickColorLerp(PIN_TMR_DURATION);
+	BTN_SHORT_MS = (g_cfg.buttonShortPress * 100);
+	BTN_LONG_MS = (g_cfg.buttonLongPress * 100);
+	BTN_HOLD_REPEAT_MS = (g_cfg.buttonHoldRepeat * 100);
+
+	int debounceMS;
+	if (CFG_HasFlag(OBK_FLAG_BTN_INSTANTTOUCH)) {
+		debounceMS = 100;
+	}
+	else {
+		debounceMS = 250;
 	}
 
-	// WiFi LED
-	// In Open Access point mode, fast blink
-	if(Main_IsOpenAccessPointMode()) {
-		g_wifiLedToggleTime += PIN_TMR_DURATION;
-		if(g_wifiLedToggleTime > WIFI_LED_FAST_BLINK_DURATION) {
-			g_wifi_ledState = !g_wifi_ledState;
-			g_wifiLedToggleTime = 0;
-			PIN_set_wifi_led(g_wifi_ledState);
-		}
-	} else if(Main_IsConnectedToWiFi()) {
-		// In WiFi client success mode, just stay enabled
-		PIN_set_wifi_led(1);
-	} else {
-		// in connecting mode, slow blink
-		g_wifiLedToggleTime += PIN_TMR_DURATION;
-		if(g_wifiLedToggleTime > WIFI_LED_SLOW_BLINK_DURATION) {
-			g_wifi_ledState = !g_wifi_ledState;
-			g_wifiLedToggleTime = 0;
-			PIN_set_wifi_led(g_wifi_ledState);
-		}
-	}
-
-
+	int activepins = 0;
+	uint32_t pinvalues = 0;
 	for(i = 0; i < PLATFORM_GPIO_MAX; i++) {
+		// note pins which are active - i.e. would not trigger an edge interrupt on change.
+		// if we have any, then we must poll until none
+		// TODO: this will only be used when GPI interrupt triggeringis used.
+		// but it's useful info anyway...
+		if (g_gpio_index_map & (1<<i)){
+			uint32_t level = 1;
+			if (g_gpio_edge_map & (1<<i)){
+				level = 0;
+			}
+			int rawval = HAL_PIN_ReadDigitalInput(i);
+			if (rawval && level == 1){
+				activepins ++;
+				pinvalues |= (1 << i);
+			}
+			if (!rawval && level == 0){
+				activepins ++;
+				pinvalues |= (1 << i);
+			}
+		}
+		// activepins is count of pins which are 'active', i.e. match thier expected active level
+		if (activepins){
+			activepoll_time = 1000; //20 x 50ms = 1s of polls after button release
+		}
+
 #if 1
 		if(g_cfg.pins.roles[i] == IOR_PWM) {
-			HAL_PIN_PWM_Update(i,g_channelValues[g_cfg.pins.channels[i]]);
+			HAL_PIN_PWM_Update(i, g_channelValuesFloats[g_cfg.pins.channels[i]]);
 		} else if(g_cfg.pins.roles[i] == IOR_PWM_n) {
 			// invert PWM value
-			HAL_PIN_PWM_Update(i,100-g_channelValues[g_cfg.pins.channels[i]]);
+			HAL_PIN_PWM_Update(i,100- g_channelValuesFloats[g_cfg.pins.channels[i]]);
 		} else
 #endif
 		if(g_cfg.pins.roles[i] == IOR_Button || g_cfg.pins.roles[i] == IOR_Button_n
 			|| g_cfg.pins.roles[i] == IOR_Button_ToggleAll || g_cfg.pins.roles[i] == IOR_Button_ToggleAll_n
 			|| g_cfg.pins.roles[i] == IOR_Button_NextColor || g_cfg.pins.roles[i] == IOR_Button_NextColor_n
-			|| g_cfg.pins.roles[i] == IOR_Button_NextDimmer || g_cfg.pins.roles[i] == IOR_Button_NextDimmer_n) {
+			|| g_cfg.pins.roles[i] == IOR_Button_NextDimmer || g_cfg.pins.roles[i] == IOR_Button_NextDimmer_n
+			|| g_cfg.pins.roles[i] == IOR_Button_NextTemperature || g_cfg.pins.roles[i] == IOR_Button_NextTemperature_n
+			|| g_cfg.pins.roles[i] == IOR_Button_ScriptOnly || g_cfg.pins.roles[i] == IOR_Button_ScriptOnly_n) {
 			//addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL,"Test hold %i\r\n",i);
-			PIN_Input_Handler(i);
+			PIN_Input_Handler(i, t_diff);
 		}
 		else if(g_cfg.pins.roles[i] == IOR_DigitalInput || g_cfg.pins.roles[i] == IOR_DigitalInput_n
 			||
 			g_cfg.pins.roles[i] == IOR_DigitalInput_NoPup || g_cfg.pins.roles[i] == IOR_DigitalInput_NoPup_n) {
 			// read pin digital value (and already invert it if needed)
 			value = PIN_ReadDigitalInputValue_WithInversionIncluded(i);
+
 #if 0
-			CHANNEL_Set(g_cfg.pins.channels[i], value,0);
+			CHANNEL_Set(g_cfg.pins.channels[i], value, 0);
 #else
 			// debouncing
-			if(value) {
-				if(g_timesUp[i] > TOGGLE_PIN_DEBOUNCE_CYCLES) {
-					if(g_lastValidState[i] != value) {
+			if (value) {
+				if (g_times[i] > debounceMS) {
+					if (g_lastValidState[i] != value) {
 						// became up
 						g_lastValidState[i] = value;
-						CHANNEL_Set(g_cfg.pins.channels[i], value,0);
+						CHANNEL_Set(g_cfg.pins.channels[i], value, 0);
 					}
-				} else {
-					g_timesUp[i]++;
 				}
-				g_timesDown[i] = 0;
-			} else {
-				if(g_timesDown[i] > TOGGLE_PIN_DEBOUNCE_CYCLES) {
-					if(g_lastValidState[i] != value) {
+				else {
+					g_times[i] += t_diff;
+				}
+				g_times2[i] = 0;
+			}
+			else {
+				if (g_times2[i] > debounceMS) {
+					if (g_lastValidState[i] != value) {
 						// became down
 						g_lastValidState[i] = value;
-						CHANNEL_Set(g_cfg.pins.channels[i], value,0);
+						CHANNEL_Set(g_cfg.pins.channels[i], value, 0);
 					}
-				} else {
-					g_timesDown[i]++;
 				}
-				g_timesUp[i] = 0;
+				else {
+					g_times2[i]+= t_diff;
+				}
+				g_times[i] = 0;
 			}
 
 #endif
 		} else if(g_cfg.pins.roles[i] == IOR_ToggleChannelOnToggle) {
 			// we must detect a toggle, but with debouncing
 			value = PIN_ReadDigitalInputValue_WithInversionIncluded(i);
-			if(value) {
-				if(g_timesUp[i] > TOGGLE_PIN_DEBOUNCE_CYCLES) {
-					if(g_lastValidState[i] != value) {
-						// became up
-						g_lastValidState[i] = value;
-						CHANNEL_Toggle(g_cfg.pins.channels[i]);
-						// fire event - IOR_ToggleChannelOnToggle has been toggle
-						// Argument is a pin number (NOT channel)
-						EventHandlers_FireEvent(CMD_EVENT_PIN_ONTOGGLE,i);
-					}
-				} else {
-					g_timesUp[i]++;
+			// debouncing
+			if (g_times[i] <= 0) {
+				if (g_lastValidState[i] != value) {
+					// became up
+					g_lastValidState[i] = value;
+					CHANNEL_Toggle(g_cfg.pins.channels[i]);
+					// fire event - IOR_ToggleChannelOnToggle has been toggle
+					// Argument is a pin number (NOT channel)
+					EventHandlers_FireEvent(CMD_EVENT_PIN_ONTOGGLE, i);
+					// lock for given time
+					g_times[i] = debounceMS;
 				}
-				g_timesDown[i] = 0;
-			} else {
-				if(g_timesDown[i] > TOGGLE_PIN_DEBOUNCE_CYCLES) {
-					if(g_lastValidState[i] != value) {
-						// became down
-						g_lastValidState[i] = value;
-						CHANNEL_Toggle(g_cfg.pins.channels[i]);
-						// fire event - IOR_ToggleChannelOnToggle has been toggle
-						// Argument is a pin number (NOT channel)
-						EventHandlers_FireEvent(CMD_EVENT_PIN_ONTOGGLE,i);
-					}
-				} else {
-					g_timesDown[i]++;
-				}
-				g_timesUp[i] = 0;
+			}
+			else {
+				g_times[i] -= t_diff;
 			}
 		}
 	}
+
+#ifdef PLATFORM_BEKEN
+#ifdef BEKEN_PIN_GPI_INTERRUPTS
+	// TODO: not implemented yet - this bit continues polling
+	// for a while after a GPI is fired, so that we can see long press, etc.
+	if (param){
+		addLogAdv(LOG_DEBUG, LOG_FEATURE_GENERAL,"Pin intr at %d (+%d) (%x)", g_time, t_diff, pinvalues);
+	}
+#endif
+#endif
+
+	if (activepoll_time){
+		activepoll_time -= t_diff;
+		if (activepoll_time <= 0){
+			activepoll_time = 0;
+		}
+	}
+	if (activepoll_time){
+		// setup to poll in 50ms
+#ifdef PLATFORM_BEKEN
+#ifdef BEKEN_PIN_GPI_INTERRUPTS
+		PIN_TriggerPoll();
+		if (activepins){
+			addLogAdv(LOG_DEBUG, LOG_FEATURE_GENERAL,"Pins active at %d (%x)", g_time, pinvalues);
+		} else {
+			addLogAdv(LOG_DEBUG, LOG_FEATURE_GENERAL,"Pins ->inactive at %d (%x)", g_time, pinvalues);
+		}
+#endif
+#endif
+
+	} else {
+#ifdef PLATFORM_BEKEN
+#ifdef BEKEN_PIN_GPI_INTERRUPTS
+		addLogAdv(LOG_DEBUG, LOG_FEATURE_GENERAL,"Pins inactive at %d", g_time, pinvalues);
+#endif		
+#endif		
+	}
+
 }
 // setChannelType 3 LowMidHigh
 int CHANNEL_ParseChannelType(const char *s) {
@@ -1198,9 +1549,17 @@ int CHANNEL_ParseChannelType(const char *s) {
 		return ChType_EnergyToday_kWh_div1000;
 	if (!stricmp(s, "Current_div1000"))
 		return ChType_Current_div1000;
+	if (!stricmp(s, "OpenClosed"))
+		return ChType_OpenClosed;
+	if (!stricmp(s, "OpenClosed_inv"))
+		return ChType_OpenClosed_Inv;
+	if (!stricmp(s, "BatteryLevelPercent"))
+		return ChType_BatteryLevelPercent;
+	if (!stricmp(s, "OffDimBright"))
+		return ChType_OffDimBright;
 	return ChType_Error;
 }
-static int CMD_setButtonHoldRepeat(const void *context, const char *cmd, const char *args, int cmdFlags){
+static commandResult_t CMD_setButtonHoldRepeat(const void *context, const char *cmd, const char *args, int cmdFlags){
 
 
 	Tokenizer_TokenizeString(args,0);
@@ -1208,7 +1567,7 @@ static int CMD_setButtonHoldRepeat(const void *context, const char *cmd, const c
 	if(Tokenizer_GetArgsCount() < 1) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL,"This command requires 1 argument - timeRepeat - current %i",
 			g_cfg.buttonHoldRepeat);
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 
 
@@ -1221,9 +1580,11 @@ static int CMD_setButtonHoldRepeat(const void *context, const char *cmd, const c
 		);
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL,"If something is wrong, you can restore default %i",
 		CFG_DEFAULT_BTN_REPEAT);
-	return 0;
+	return CMD_RES_OK;
 }
-static int CMD_SetButtonTimes(const void *context, const char *cmd, const char *args, int cmdFlags){
+// SetButtonTimes [ValLongPress] [ValShortPress] [ValRepeat]
+// Each value is times 100ms, so: SetButtonTimes 2 1 1 means 200ms long press, 100ms short and 100ms repeat
+static commandResult_t CMD_SetButtonTimes(const void *context, const char *cmd, const char *args, int cmdFlags){
 
 
 	Tokenizer_TokenizeString(args,0);
@@ -1231,7 +1592,7 @@ static int CMD_SetButtonTimes(const void *context, const char *cmd, const char *
 	if(Tokenizer_GetArgsCount() < 3) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL,"This command requires 3 arguments - timeLong, timeShort, timeRepeat - current %i %i %i",
 			g_cfg.buttonLongPress, g_cfg.buttonShortPress, g_cfg.buttonHoldRepeat);
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 
 	CFG_SetButtonLongPressTime(Tokenizer_GetArgInteger(0));
@@ -1249,7 +1610,7 @@ static int CMD_SetButtonTimes(const void *context, const char *cmd, const char *
 		CFG_DEFAULT_BTN_LONG, CFG_DEFAULT_BTN_SHORT,CFG_DEFAULT_BTN_REPEAT);
 	return 0;
 }
-static int CMD_ShowChannelValues(const void *context, const char *cmd, const char *args, int cmdFlags){
+static commandResult_t CMD_ShowChannelValues(const void *context, const char *cmd, const char *args, int cmdFlags){
 	int i;
 
 	for(i = 0; i < CHANNEL_MAX; i++) {
@@ -1258,9 +1619,9 @@ static int CMD_ShowChannelValues(const void *context, const char *cmd, const cha
 		}
 	}
 
-	return 0;
+	return CMD_RES_OK;
 }
-static int CMD_SetChannelType(const void *context, const char *cmd, const char *args, int cmdFlags){
+static commandResult_t CMD_SetChannelType(const void *context, const char *cmd, const char *args, int cmdFlags){
 	int channel;
 	const char *type;
 	int typeCode;
@@ -1269,7 +1630,7 @@ static int CMD_SetChannelType(const void *context, const char *cmd, const char *
 
 	if(Tokenizer_GetArgsCount() < 2) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL,"This command requires 2 arguments");
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	channel = Tokenizer_GetArgInteger(0);
 	type = Tokenizer_GetArg(1);
@@ -1278,14 +1639,49 @@ static int CMD_SetChannelType(const void *context, const char *cmd, const char *
 	if(typeCode == ChType_Error) {
 
 		addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL,"Channel %i type not set because %s is not a known type", channel,type);
-		return 1;
+		return CMD_RES_BAD_ARGUMENT;
 	}
 
 	CHANNEL_SetType(channel,typeCode);
 
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL,"Channel %i type changed to %s", channel,type);
-	return 0;
+	return CMD_RES_OK;
 }
+
+/// @brief Computes the Relay and PWM count.
+/// @param relayCount Number of relay and LED channels.
+/// @param pwmCount Number of PWM channels.
+void get_Relay_PWM_Count(int* relayCount, int* pwmCount, int* dInputCount) {
+	int i;
+	(*relayCount) = 0;
+	(*pwmCount) = 0;
+	(*dInputCount) = 0;
+
+	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
+		int role = PIN_GetPinRoleForPinIndex(i);
+		switch (role) {
+		case IOR_Relay:
+		case IOR_Relay_n:
+		case IOR_LED:
+		case IOR_LED_n:
+			(*relayCount)++;
+			break;
+		case IOR_PWM:
+		case IOR_PWM_n:
+			(*pwmCount)++;
+			break;
+		case IOR_DigitalInput:
+		case IOR_DigitalInput_n:
+		case IOR_DigitalInput_NoPup:
+		case IOR_DigitalInput_NoPup_n:
+			(*dInputCount)++;
+			break;
+		default:
+			break;
+		}
+	}
+}
+
 
 int h_isChannelPWM(int tg_ch){
     int i;
@@ -1315,10 +1711,29 @@ int h_isChannelRelay(int tg_ch) {
         if(role == IOR_Relay || role == IOR_Relay_n || role == IOR_LED || role == IOR_LED_n) {
 			return true;
         }
+        if((role == IOR_BridgeForward) || (role == IOR_BridgeReverse))
+        {
+            return true;
+        }
     }
 	return false;
 }
-static int showgpi(const void *context, const char *cmd, const char *args, int cmdFlags){
+int h_isChannelDigitalInput(int tg_ch) {
+    int i;
+	int role;
+
+    for(i = 0; i < PLATFORM_GPIO_MAX; i++) {
+        int ch = PIN_GetPinChannelForPinIndex(i);
+		if(tg_ch != ch)
+			continue;
+        role = PIN_GetPinRoleForPinIndex(i);
+        if(role == IOR_DigitalInput || role == IOR_DigitalInput_n || role == IOR_DigitalInput_NoPup || role == IOR_DigitalInput_NoPup_n) {
+			return true;
+        }
+    }
+	return false;
+}
+static commandResult_t showgpi(const void *context, const char *cmd, const char *args, int cmdFlags){
 	int i;
 	unsigned int value = 0;
 
@@ -1330,77 +1745,34 @@ static int showgpi(const void *context, const char *cmd, const char *args, int c
 		value |= ((val & 1)<<i);
 	}
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL,"GPIs are 0x%x", value);
-	return 1;
+	return CMD_RES_OK;
 }
-
-
-
-#if WINDOWS
-
-#elif PLATFORM_BL602
-void button_timer_thread(void *param)
-{
-    while(1) {
-        vTaskDelay(PIN_TMR_DURATION);
-		PIN_ticks(0);
-    }
-}
-#elif PLATFORM_W600 || PLATFORM_W800
-void button_timer_thread(void *param)
-{
-    while(1) {
-        vTaskDelay(PIN_TMR_DURATION);
-		PIN_ticks(0);
-    }
-}
-#elif PLATFORM_XR809
-OS_Timer_t timer;
-#else
-beken_timer_t g_pin_timer;
-#endif
-void PIN_StartButtonScanThread(void)
-{
-#if WINDOWS
-
-#elif PLATFORM_BL602
-
-    xTaskCreate(button_timer_thread, "buttons", 1024, NULL, 15, NULL);
-#elif PLATFORM_W600 || PLATFORM_W800
-
-    xTaskCreate(button_timer_thread, "buttons", 1024, NULL, 15, NULL);
-#elif PLATFORM_XR809
-
-	OS_TimerSetInvalid(&timer);
-	if (OS_TimerCreate(&timer, OS_TIMER_PERIODIC, PIN_ticks, NULL,
-	                   PIN_TMR_DURATION) != OS_OK) {
-		printf("PIN_AddCommands timer create failed\n");
-		return;
-	}
-
-	OS_TimerStart(&timer); /* start OS timer to feed watchdog */
-#else
-	OSStatus result;
-
-    result = rtos_init_timer(&g_pin_timer,
-                            PIN_TMR_DURATION,
-                            PIN_ticks,
-                            (void *)0);
-    ASSERT(kNoErr == result);
-
-    result = rtos_start_timer(&g_pin_timer);
-    ASSERT(kNoErr == result);
-#endif
-
-
-
-}
-
 void PIN_AddCommands(void)
 {
-	CMD_RegisterCommand("showgpi", NULL, showgpi, "log stat of all GPIs", NULL);
-	CMD_RegisterCommand("setChannelType", NULL, CMD_SetChannelType, "qqqqqqqq", NULL);
-	CMD_RegisterCommand("showChannelValues", NULL,CMD_ShowChannelValues, "log channel values", NULL);
-	CMD_RegisterCommand("setButtonTimes", NULL,CMD_SetButtonTimes, "", NULL);
-	CMD_RegisterCommand("setButtonHoldRepeat", NULL,CMD_setButtonHoldRepeat, "", NULL);
+	//cmddetail:{"name":"showgpi","args":"NULL",
+	//cmddetail:"descr":"log stat of all GPIs",
+	//cmddetail:"fn":"showgpi","file":"new_pins.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("showgpi", showgpi, NULL);
+	//cmddetail:{"name":"setChannelType","args":"[ChannelIndex][TypeString]",
+	//cmddetail:"descr":"Sets a custom type for channel. Types are mostly used to determine how to display channel value on GUI",
+	//cmddetail:"fn":"CMD_SetChannelType","file":"new_pins.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("setChannelType", CMD_SetChannelType, NULL);
+	//cmddetail:{"name":"showChannelValues","args":"",
+	//cmddetail:"descr":"log channel values",
+	//cmddetail:"fn":"CMD_ShowChannelValues","file":"new_pins.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("showChannelValues", CMD_ShowChannelValues, NULL);
+	//cmddetail:{"name":"setButtonTimes","args":"[ValLongPress][ValShortPress][ValRepeat]",
+	//cmddetail:"descr":"Each value is times 100ms, so: SetButtonTimes 2 1 1 means 200ms long press, 100ms short and 100ms repeat",
+	//cmddetail:"fn":"CMD_SetButtonTimes","file":"new_pins.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("setButtonTimes", CMD_SetButtonTimes, NULL);
+	//cmddetail:{"name":"setButtonHoldRepeat","args":"[Value]",
+	//cmddetail:"descr":"Sets just the hold button repeat time, given value is times 100ms, so write 1 for 100ms, 2 for 200ms, etc",
+	//cmddetail:"fn":"CMD_setButtonHoldRepeat","file":"new_pins.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("setButtonHoldRepeat", CMD_setButtonHoldRepeat, NULL);
 
 }

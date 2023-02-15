@@ -18,7 +18,7 @@ static char g_ipStr[32];
 
 void HAL_ConnectToWiFi(const char *ssid, const char *psk)
 {
-
+	g_wifiStatusCallback(WIFI_STA_CONNECTED);
 }
 
 void HAL_DisconnectFromWifi()
@@ -33,7 +33,7 @@ int HAL_SetupWiFiOpenAccessPoint(const char *ssid) {
 }
 
 void HAL_WiFi_SetupStatusCallback(void (*cb)(int code)) {
-	
+	g_wifiStatusCallback = cb;
 	// ok
 	return;
 }
@@ -46,7 +46,12 @@ int WiFI_SetMacAddress(char *mac) {
 
 }
 void WiFI_GetMacAddress(char *mac) {
-
+	mac[0] = 0xBA;
+	mac[1] = 0xDA;
+	mac[2] = 0x31;
+	mac[3] = 0x45;
+	mac[4] = 0xCA;
+	mac[5] = 0xFF;
 }
 
 void HAL_PrintNetworkInfo() {

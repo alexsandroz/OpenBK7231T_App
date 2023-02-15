@@ -60,59 +60,93 @@ static int g_ntp_delay = 5;
 // current time
 static unsigned int g_time;
 static bool g_synced;
-// time offset (time zone?)
-static int g_timeOffsetHours;
+// time offset (time zone?) in seconds
+static int g_timeOffsetSeconds;
 
-int NTP_GetTimesZoneOfs()
+int NTP_GetTimesZoneOfsSeconds()
 {
-    return g_timeOffsetHours;
+    return g_timeOffsetSeconds;
 }
+commandResult_t NTP_SetTimeZoneOfs(const void *context, const char *cmd, const char *args, int cmdFlags) {
+	int a, b;
+	const char *arg;
 
-int NTP_SetTimeZoneOfs(const void *context, const char *cmd, const char *args, int cmdFlags) {
     Tokenizer_TokenizeString(args,0);
-    if(Tokenizer_GetArgsCount() < 1) {
-        addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"Command requires one argument\n");
-        return 0;
-    }
-    g_timeOffsetHours = Tokenizer_GetArgInteger(0) * 60 * 60;
-    addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"NTP offset set, wait for next ntp packet to apply changes\n");
-    return 1;
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 1)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+	arg = Tokenizer_GetArg(0);
+	if (strchr(arg, ':')) {
+		int useSign = 1;
+		if (*arg == '-') {
+			arg++;
+			useSign = -1;
+		}
+		sscanf(arg, "%i:%i", &a, &b);
+		g_timeOffsetSeconds = useSign * (a * 60 * 60 + b * 60);
+	}
+	else {
+		g_timeOffsetSeconds = Tokenizer_GetArgInteger(0) * 60 * 60;
+	}
+    addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"NTP offset set, wait for next ntp packet to apply changes");
+    return CMD_RES_OK;
 }
 
 //Set custom NTP server
-int NTP_SetServer(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t NTP_SetServer(const void *context, const char *cmd, const char *args, int cmdFlags) {
     const char *newValue;
 
     Tokenizer_TokenizeString(args,0);
-    if(Tokenizer_GetArgsCount() < 1) {
-        addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"Argument missing e.g. ntp_setServer ipAddress\n");
-        return 0;
-    }
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 1)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
     newValue = Tokenizer_GetArg(0);
     CFG_SetNTPServer(newValue);
-    addLogAdv(LOG_INFO, LOG_FEATURE_NTP, "NTP server set to %s\n", newValue);
-    return 1;
+    addLogAdv(LOG_INFO, LOG_FEATURE_NTP, "NTP server set to %s", newValue);
+    return CMD_RES_OK;
 }
 
 //Display settings used by the NTP driver
-int NTP_Info(const void *context, const char *cmd, const char *args, int cmdFlags) {
-    addLogAdv(LOG_INFO, LOG_FEATURE_NTP, "Server=%s, Time offset=%d\n", CFG_GetNTPServer(), g_timeOffsetHours);
-    return 1;
+commandResult_t NTP_Info(const void *context, const char *cmd, const char *args, int cmdFlags) {
+    addLogAdv(LOG_INFO, LOG_FEATURE_NTP, "Server=%s, Time offset=%d", CFG_GetNTPServer(), g_timeOffsetSeconds);
+    return CMD_RES_OK;
 }
 
 void NTP_Init() {
 
-    CMD_RegisterCommand("ntp_timeZoneOfs","",NTP_SetTimeZoneOfs, "Sets the time zone offset in hours", NULL);
-    CMD_RegisterCommand("ntp_setServer", "", NTP_SetServer, "Sets the NTP server", NULL);
-    CMD_RegisterCommand("ntp_info", "", NTP_Info, "Display NTP related settings", NULL);
+	//cmddetail:{"name":"ntp_timeZoneOfs","args":"[Value]",
+	//cmddetail:"descr":"Sets the time zone offset in hours. Also supports HH:MM syntax if you want to specify value in minutes. For negative values, use -HH:MM syntax, for example -5:30 will shift time by 5 hours and 30 minutes negative.",
+	//cmddetail:"fn":"NTP_SetTimeZoneOfs","file":"driver/drv_ntp.c","requires":"",
+	//cmddetail:"examples":""}
+    CMD_RegisterCommand("ntp_timeZoneOfs",NTP_SetTimeZoneOfs, NULL);
+	//cmddetail:{"name":"ntp_setServer","args":"[ServerIP]",
+	//cmddetail:"descr":"Sets the NTP server",
+	//cmddetail:"fn":"NTP_SetServer","file":"driver/drv_ntp.c","requires":"",
+	//cmddetail:"examples":""}
+    CMD_RegisterCommand("ntp_setServer", NTP_SetServer, NULL);
+	//cmddetail:{"name":"ntp_info","args":"",
+	//cmddetail:"descr":"Display NTP related settings",
+	//cmddetail:"fn":"NTP_Info","file":"driver/drv_ntp.c","requires":"",
+	//cmddetail:"examples":""}
+    CMD_RegisterCommand("ntp_info", NTP_Info, NULL);
 
-    addLogAdv(LOG_INFO, LOG_FEATURE_NTP, "NTP driver initialized with server=%s, offset=%d\n", CFG_GetNTPServer(), g_timeOffsetHours);
+    addLogAdv(LOG_INFO, LOG_FEATURE_NTP, "NTP driver initialized with server=%s, offset=%d", CFG_GetNTPServer(), g_timeOffsetSeconds);
     g_synced = false;
 }
 
 unsigned int NTP_GetCurrentTime() {
     return g_time;
 }
+unsigned int NTP_GetCurrentTimeWithoutOffset() {
+	return g_time - g_timeOffsetSeconds;
+}
+
 
 
 void NTP_Shutdown() {
@@ -129,6 +163,7 @@ void NTP_Shutdown() {
 }
 void NTP_SendRequest(bool bBlocking) {
     byte *ptr;
+	const char *adrString;
     //int i, recv_len;
     //char buf[64];
     ntp_packet packet = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -159,9 +194,16 @@ void NTP_SendRequest(bool bBlocking) {
 
     memset((char *) &g_address, 0, sizeof(g_address));
 
-        g_address.sin_family = AF_INET;
-        g_address.sin_addr.s_addr = inet_addr(CFG_GetNTPServer()); // this is address of host which I want to send the socket
-        g_address.sin_port = htons(123);
+	adrString = CFG_GetNTPServer();
+	if (adrString == 0 || adrString[0] == 0) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_NTP, "NTP_SendRequest: somehow ntp server in config was empty, setting non-empty");
+		CFG_SetNTPServer(DEFAULT_NTP_SERVER);
+		adrString = CFG_GetNTPServer();
+	}
+
+    g_address.sin_family = AF_INET;
+    g_address.sin_addr.s_addr = inet_addr(adrString);
+    g_address.sin_port = htons(123);
 
 
     // Send the message to server:
@@ -178,7 +220,7 @@ void NTP_SendRequest(bool bBlocking) {
 #if WINDOWS
 #else
         if(fcntl(g_ntp_socket, F_SETFL, O_NONBLOCK)) {
-            addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"NTP_SendRequest: failed to make socket non-blocking!\n");
+            addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"NTP_SendRequest: failed to make socket non-blocking!");
         }
 #endif
     }
@@ -207,7 +249,7 @@ void NTP_CheckForReceive() {
 #endif
 
     if(recv_len < 0){
-        addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"NTP_CheckForReceive: Error while receiving server's msg\n");
+        addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"NTP_CheckForReceive: Error while receiving server's msg");
         return;
     }
     highWord = MAKE_WORD(ptr[40], ptr[41]);
@@ -215,13 +257,13 @@ void NTP_CheckForReceive() {
     // combine the four bytes (two words) into a long integer
     // this is NTP time (seconds since Jan 1 1900):
     secsSince1900 = highWord << 16 | lowWord;
-    addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"Seconds since Jan 1 1900 = %u\n",secsSince1900);
+    addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"Seconds since Jan 1 1900 = %u",secsSince1900);
 
     g_time = secsSince1900 - NTP_OFFSET;
-    g_time += g_timeOffsetHours;
-    addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"Unix time  : %u\n",g_time);
+    g_time += g_timeOffsetSeconds;
+    addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"Unix time  : %u",g_time);
     ltm = localtime((time_t*)&g_time);
-    addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"Local Time : %04d/%02d/%02d %02d:%02d:%02d\n",
+    addLogAdv(LOG_INFO, LOG_FEATURE_NTP,"Local Time : %04d/%02d/%02d %02d:%02d:%02d",
             ltm->tm_year+1900, ltm->tm_mon+1, ltm->tm_mday, ltm->tm_hour, ltm->tm_min, ltm->tm_sec);
     g_synced = true;
 #if 0
@@ -293,10 +335,10 @@ void NTP_AppendInformationToHTTPIndexPage(http_request_t* request)
     ltm = localtime((time_t*)&g_time);
 
     if (g_synced == true)
-        hprintf255(request, "<h5>NTP: Local Time: %04d/%02d/%02d %02d:%02d:%02d </h5>",
-                ltm->tm_year+1900, ltm->tm_mon+1, ltm->tm_mday, ltm->tm_hour, ltm->tm_min, ltm->tm_sec);
+        hprintf255(request, "<h5>NTP (%s): Local Time: %04d/%02d/%02d %02d:%02d:%02d </h5>",
+			CFG_GetNTPServer(),ltm->tm_year+1900, ltm->tm_mon+1, ltm->tm_mday, ltm->tm_hour, ltm->tm_min, ltm->tm_sec);
     else 
-        hprintf255(request, "<h5>NTP: Syncing....");
+        hprintf255(request, "<h5>NTP: Syncing with %s....",CFG_GetNTPServer());
 }
 
 bool NTP_IsTimeSynced()

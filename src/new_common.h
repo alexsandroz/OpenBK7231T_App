@@ -27,6 +27,11 @@ int vsnprintf2(char *o, size_t olen, char const *fmt, va_list arg);
 int snprintf2(char *o, size_t olen, const char* fmt, ...);
 int sprintf2(char *o, const char* fmt, ...);
 
+// from http_fns.  should move to a utils file.
+extern unsigned char hexbyte(const char* hex);
+
+void OTA_RequestDownloadFromHTTP(const char *s);
+
 #if WINDOWS
 #define DEVICENAME_PREFIX_FULL "WinTest"
 #define DEVICENAME_PREFIX_SHORT "WT"
@@ -106,11 +111,15 @@ This platform is not supported, error!
 #define MAX(a,b)	(((a)>(b))?(a):(b))
 #endif
 
+#define OBK_IS_NAN(x) ((x)!=(x))
+
 #if WINDOWS
 
 #include <time.h>
 #include <stdint.h>
+#include <math.h>
 
+#define portTICK_RATE_MS 1000
 #define bk_printf printf
 
 // generic
@@ -265,6 +274,9 @@ OSStatus rtos_create_thread( beken_thread_t* thread,
 #include <task.h>
 #include <portable.h>
 #include <semphr.h>
+#include "lwip/sys.h"
+
+#define portTICK_RATE_MS                      ( ( portTickType ) 1000 / configTICK_RATE_HZ )
 
 #define bk_printf printf
 #define os_strcpy strcpy
@@ -272,6 +284,7 @@ OSStatus rtos_create_thread( beken_thread_t* thread,
 #define os_free free
 #define os_memset memset
 
+#define portTICK_PERIOD_MS	portTICK_RATE_MS
 
 #define rtos_delay_milliseconds sys_msleep
 #define delay_ms sys_msleep
@@ -365,11 +378,14 @@ int strcpy_safe(char *tg, const char *src, int tgMaxLen);
 int strcpy_safe_checkForChanges(char *tg, const char *src, int tgMaxLen);
 void urldecode2_safe(char *dst, const char *srcin, int maxDstLen);
 int strIsInteger(const char *s);
+const char* strcasestr(const char* str1, const char* str2);
 
 // user_main.c
 int Time_getUpTimeSeconds();
 char Tiny_CRC8(const char *data,int length);
 void RESET_ScheduleModuleReset(int delSeconds);
+void MAIN_ScheduleUnsafeInit(int delSeconds);
+void Main_ScheduleHomeAssistantDiscovery(int seconds);
 int Main_IsConnectedToWiFi();
 int Main_IsOpenAccessPointMode();
 void Main_Init();
@@ -381,7 +397,6 @@ void Main_OnPingCheckerReply(int ms);
 
 // new_ping.c
 void Main_SetupPingWatchDog(const char *target/*, int delayBetweenPings_Seconds*/);
-void Main_PingWatchDogSilent();
 int PingWatchDog_GetTotalLost();
 int PingWatchDog_GetTotalReceived();
 
@@ -390,9 +405,18 @@ int PingWatchDog_GetTotalReceived();
 int LWIP_GetMaxSockets();
 int LWIP_GetActiveSockets();
 
+//delay function do 10*r nops, because rtos_delay_milliseconds is too much
+void usleep(int r);
+
 // linear mapping function --> https://www.arduino.cc/reference/en/language/functions/math/map/
 
 #define MAP(x, in_min, in_max, out_min, out_max) (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+
+typedef enum lcdPrintType_e {
+	LCD_PRINT_DEFAULT,
+	LCD_PRINT_FLOAT,
+	LCD_PRINT_INT,
+} lcdPrintType_t;
 
 typedef enum
 {
@@ -405,6 +429,16 @@ typedef enum
 
 WIFI_RSSI_LEVEL wifi_rssi_scale(int8_t rssi_value);
 extern const char *str_rssi[];
+extern int bSafeMode;
+extern int g_timeSinceLastPingReply;
+extern int g_startPingWatchDogAfter;
+
+
+typedef int(*jsonCb_t)(void *userData, const char *fmt, ...);
+int JSON_ProcessCommandReply(const char *cmd, const char *args, void *request, jsonCb_t printer, int flags);
+void ScheduleDriverStart(const char *name, int delay);
+bool isWhiteSpace(char ch);
+
 
 #endif /* __NEW_COMMON_H__ */
 

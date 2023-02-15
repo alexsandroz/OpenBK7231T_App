@@ -3,7 +3,17 @@
 
 #include "../new_common.h"
 
-typedef int (*commandHandler_t)(const void* context, const char* cmd, const char* args, int flags);
+typedef enum commandResult_e {
+	CMD_RES_OK,
+	CMD_RES_UNKNOWN_COMMAND,
+	CMD_RES_NOT_ENOUGH_ARGUMENTS,
+	CMD_RES_EMPTY_STRING,
+	CMD_RES_BAD_ARGUMENT,
+	CMD_RES_ERROR,
+
+} commandResult_t;
+
+typedef commandResult_t (*commandHandler_t)(const void* context, const char* cmd, const char* args, int flags);
 
 // command was entered in console (web app etc)
 #define COMMAND_FLAG_SOURCE_CONSOLE		1
@@ -15,15 +25,24 @@ typedef int (*commandHandler_t)(const void* context, const char* cmd, const char
 #define COMMAND_FLAG_SOURCE_HTTP		8
 // command was sent by TCP CMD
 #define COMMAND_FLAG_SOURCE_TCP			16
-// command was sent by TCP CMD
+// command was sent by IR
 #define COMMAND_FLAG_SOURCE_IR			32
+// command was sent by OBK Tele requester
+#define COMMAND_FLAG_SOURCE_TELESENDER	64
 
+extern bool g_powersave;
 
 //
-void CMD_Init();
-void CMD_RegisterCommand(const char* name, const char* args, commandHandler_t handler, const char* userDesc, void* context);
-int CMD_ExecuteCommand(const char* s, int cmdFlags);
-int CMD_ExecuteCommandArgs(const char* cmd, const char* args, int cmdFlags);
+void CMD_Init_Early();
+void CMD_Init_Delayed();
+void CMD_FreeAllCommands();
+void CMD_RunUartCmndIfRequired();
+void CMD_RegisterCommand(const char* name, commandHandler_t handler,  void* context);
+commandResult_t CMD_ExecuteCommand(const char* s, int cmdFlags);
+commandResult_t CMD_ExecuteCommandArgs(const char* cmd, const char* args, int cmdFlags);
+// like a strdup, but will expand constants.
+// Please remember to free the returned string
+char *CMD_ExpandingStrdup(const char *in);
 
 enum EventCode {
 	CMD_EVENT_NONE,
@@ -76,6 +95,21 @@ enum EventCode {
 	// for buttons
 	CMD_EVENT_PIN_ONRELEASE,
 
+	CMD_EVENT_PIN_ONPRESS,
+
+	CMD_EVENT_LED_STATE,
+
+	CMD_EVENT_IPCHANGE,
+
+	CMD_EVENT_WIFI_STATE, // Argument: [HALWifiStatus_t]
+
+	CMD_EVENT_PIN_ON3CLICK,
+	CMD_EVENT_PIN_ON4CLICK,
+
+	CMD_EVENT_CHANGE_NOPINGTIME,
+
+	CMD_EVENT_TUYAMCU_PARSED, // Argument: TuyaMCU packet type
+
 	// must be lower than 256
 	CMD_EVENT_MAX_TYPES
 };
@@ -101,11 +135,14 @@ enum LightMode {
 	Light_All,
 };
 
-#define TOKENIZER_ALLOW_QUOTES			1
-#define TOKENIZER_DONT_EXPAND			2
+#define TOKENIZER_ALLOW_QUOTES					1
+#define TOKENIZER_DONT_EXPAND					2
+// expand constants within whole command and not per-argumenet
+#define TOKENIZER_ALTERNATE_EXPAND_AT_START		4
 
 // cmd_tokenizer.c
 int Tokenizer_GetArgsCount();
+bool Tokenizer_CheckArgsCountAndPrintWarning(const char *cmdStr, int reqCount);
 const char* Tokenizer_GetArg(int i);
 const char* Tokenizer_GetArgFrom(int i);
 int Tokenizer_GetArgInteger(int i);
@@ -116,6 +153,7 @@ void Tokenizer_TokenizeString(const char* s, int flags);
 // cmd_repeatingEvents.c
 void RepeatingEvents_Init();
 void RepeatingEvents_OnEverySecond();
+void SIM_GenerateRepeatingEventsDesc(char *o, int outLen);
 // cmd_eventHandlers.c
 void EventHandlers_Init();
 // This is useful to fire an event when a certain UART string command is received.
@@ -125,24 +163,28 @@ void EventHandlers_FireEvent_String(byte eventCode, const char* argument);
 // Then eventCode is a BUTTON_PRESS and argument is a button index.
 void EventHandlers_FireEvent(byte eventCode, int argument);
 void EventHandlers_FireEvent2(byte eventCode, int argument, int argument2);
+void EventHandlers_FireEvent3(byte eventCode, int argument, int argument2, int argument3);
 // This is more advanced event handler. It will only fire handlers when a variable state changes from one to another.
 // For example, you can watch for Voltage from BL0942 to change below 230, and it will fire event only when it becomes below 230.
 void EventHandlers_ProcessVariableChange_Integer(byte eventCode, int oldValue, int newValue);
+int EventHandlers_GetActiveCount();
 // cmd_tasmota.c
 int taslike_commands_init();
 // cmd_newLEDDriver.c
 void NewLED_InitCommands();
 void NewLED_RestoreSavedStateIfNeeded();
 float LED_GetDimmer();
-void LED_AddDimmer(int iVal, bool wrapAroundInsteadOfClamp, int minValue);
+void LED_AddDimmer(int iVal, int addMode, int minValue);
+void LED_AddTemperature(int iVal, bool wrapAroundInsteadOfClamp);
 void LED_NextDimmerHold();
+void LED_NextTemperatureHold();
 int LED_IsRunningDriver();
 float LED_GetTemperature();
 void LED_SetTemperature(int tmpInteger, bool bApply);
 float LED_GetTemperature0to1Range();
 void LED_SetTemperature0to1Range(float f);
 void LED_SetDimmer(int iVal);
-int LED_SetBaseColor(const void* context, const char* cmd, const char* args, int bAll);
+commandResult_t LED_SetBaseColor(const void* context, const char* cmd, const char* args, int bAll);
 void LED_SetFinalCW(byte c, byte w);
 void LED_SetFinalRGB(byte r, byte g, byte b);
 void LED_SetFinalRGBCW(byte* rgbcw);
@@ -161,22 +203,35 @@ void LED_GetBaseColorString(char* s);
 int LED_GetMode();
 float LED_GetHue();
 float LED_GetSaturation();
+float LED_GetGreen255();
+float LED_GetRed255();
+float LED_GetBlue255();
 void LED_RunQuickColorLerp(int deltaMS);
+OBK_Publish_Result sendFinalColor();
+OBK_Publish_Result sendColorChange();
 OBK_Publish_Result LED_SendEnableAllState();
 OBK_Publish_Result LED_SendDimmerChange();
+OBK_Publish_Result sendTemperatureChange();
 OBK_Publish_Result LED_SendCurrentLightMode();
+void LED_ResetGlobalVariablesToDefaults();
 // cmd_test.c
-int fortest_commands_init();
+int CMD_InitTestCommands();
 // cmd_channels.c
 void CMD_InitChannelCommands();
 // cmd_send.c
 int CMD_InitSendCommands();
 // cmd_tcp.c
 void CMD_StartTCPCommandLine();
+// cmd_script.c
+int CMD_GetCountActiveScriptThreads();
 
 void SVM_RunThreads(int deltaMS);
 void CMD_InitScripting();
 byte* LFS_ReadFile(const char* fname);
 
+commandResult_t CMD_ClearAllHandlers(const void *context, const char *cmd, const char *args, int cmdFlags);
+commandResult_t RepeatingEvents_Cmd_ClearRepeatingEvents(const void *context, const char *cmd, const char *args, int cmdFlags);
+commandResult_t CMD_resetSVM(const void *context, const char *cmd, const char *args, int cmdFlags);
+int RepeatingEvents_GetActiveCount();
 
 #endif // __CMD_PUBLIC_H__

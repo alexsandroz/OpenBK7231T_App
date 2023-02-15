@@ -9,6 +9,7 @@
 #include "drv_local.h"
 #include "drv_uart.h"
 #include "../httpserver/new_http.h"
+#include <math.h>
 
 static float BL0942_PREF = 598;
 static float BL0942_UREF = 15188;
@@ -19,7 +20,9 @@ static int raw_unscaled_current;
 static int raw_unscaled_power;
 static int raw_unscaled_freq;
 
-
+static float valid_voltage = 0.0f;
+static float valid_current = 0.0f;
+static float valid_power = 0.0f;
 
 #define BL0942_BAUD_RATE 4800
 
@@ -95,6 +98,8 @@ int BL0942_TryToGetNextBL0942Packet() {
 
 	// those are not values like 230V, but unscaled
 	addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"Unscaled current %d, voltage %d, power %d, freq %d\n", raw_unscaled_current, raw_unscaled_voltage,raw_unscaled_power,raw_unscaled_freq);
+    addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"HEX Current: %08lX; Voltage: %08lX; Power: %08lX;\n", (unsigned long)raw_unscaled_current, 
+              (unsigned long)raw_unscaled_voltage, (unsigned long)raw_unscaled_power);
 
 	// those are final values, like 230V
 	{
@@ -102,8 +107,20 @@ int BL0942_TryToGetNextBL0942Packet() {
 		power = (raw_unscaled_power / BL0942_PREF);
 		voltage = (raw_unscaled_voltage / BL0942_UREF);
 		current = (raw_unscaled_current / BL0942_IREF);
+        addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"Real current %1.3lf, voltage %1.1lf, power %1.1lf\n", current, voltage, power);
 
-		BL_ProcessUpdate(voltage,current,power);
+        /* Logical check of values */
+        if (abs(power) <= (voltage * current * 1.1f))
+        {
+            valid_voltage = voltage;
+            valid_current = current;
+            valid_power = power;
+            addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"Valid current %1.3lf, voltage %1.1lf, power %1.1lf\n", valid_current, valid_voltage, valid_power);
+        } else {
+            addLogAdv(LOG_WARN, LOG_FEATURE_ENERGYMETER,"Invalid Power value: %1.3lf Expected: %1.3lf\n", abs(power), (voltage * current));
+        }
+
+		BL_ProcessUpdate(valid_voltage, valid_current, valid_power);
 	}
 
 
@@ -126,12 +143,12 @@ void BL0942_SendRequest() {
 	UART_SendByte(BL0942_READ_COMMAND);
 	UART_SendByte(0xAA);
 }
-int BL0942_PowerSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t BL0942_PowerSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	float realPower;
 
 	if(args==0||*args==0) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	realPower = atof(args);
 	BL0942_PREF = raw_unscaled_power / realPower;
@@ -144,53 +161,53 @@ int BL0942_PowerSet(const void *context, const char *cmd, const char *args, int 
 		snprintf(dbg, sizeof(dbg),"PowerSet: you gave %f, set ref to %f\n", realPower, BL0942_PREF);
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,dbg);
 	}
-	return 0;
+	return CMD_RES_OK;
 }
-int BL0942_PowerRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t BL0942_PowerRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
 
 	if(args==0||*args==0) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	BL0942_PREF = atof(args);
 
 	// UPDATE: now they are automatically saved
 	CFG_SetPowerMeasurementCalibrationFloat(CFG_OBK_POWER,BL0942_PREF);
 
-	return 0;
+	return CMD_RES_OK;
 }
-int BL0942_CurrentRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t BL0942_CurrentRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
 
 	if(args==0||*args==0) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	BL0942_IREF = atof(args);
 
 	// UPDATE: now they are automatically saved
 	CFG_SetPowerMeasurementCalibrationFloat(CFG_OBK_CURRENT,BL0942_IREF);
 
-	return 0;
+	return CMD_RES_OK;
 }
-int BL0942_VoltageRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t BL0942_VoltageRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
 
 	if(args==0||*args==0) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	BL0942_UREF = atof(args);
 
 	// UPDATE: now they are automatically saved
 	CFG_SetPowerMeasurementCalibrationFloat(CFG_OBK_VOLTAGE,BL0942_UREF);
 
-	return 0;
+	return CMD_RES_OK;
 }
-int BL0942_VoltageSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t BL0942_VoltageSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	float realV;
 
 	if(args==0||*args==0) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	realV = atof(args);
 	BL0942_UREF = raw_unscaled_voltage / realV;
@@ -204,14 +221,14 @@ int BL0942_VoltageSet(const void *context, const char *cmd, const char *args, in
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,dbg);
 	}
 
-	return 0;
+	return CMD_RES_OK;
 }
-int BL0942_CurrentSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t BL0942_CurrentSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	float realI;
 
 	if(args==0||*args==0) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	realI = atof(args);
 	BL0942_IREF = raw_unscaled_current / realI;
@@ -224,7 +241,7 @@ int BL0942_CurrentSet(const void *context, const char *cmd, const char *args, in
 		snprintf(dbg, sizeof(dbg),"CurrentSet: you gave %f, set ref to %f\n", realI, BL0942_IREF);
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,dbg);
 	}
-	return 0;
+	return CMD_RES_OK;
 }
 void BL0942_Init() 
 {
@@ -237,12 +254,12 @@ void BL0942_Init()
 
 	UART_InitUART(BL0942_BAUD_RATE);
 	UART_InitReceiveRingBuffer(256);
-	CMD_RegisterCommand("PowerSet","",BL0942_PowerSet, "Sets current power value for calibration", NULL);
-	CMD_RegisterCommand("VoltageSet","",BL0942_VoltageSet, "Sets current V value for calibration", NULL);
-	CMD_RegisterCommand("CurrentSet","",BL0942_CurrentSet, "Sets current I value for calibration", NULL);
-	CMD_RegisterCommand("PREF","",BL0942_PowerRef, "Sets the calibration multiplier", NULL);
-	CMD_RegisterCommand("VREF","",BL0942_VoltageRef, "Sets the calibration multiplier", NULL);
-	CMD_RegisterCommand("IREF","",BL0942_CurrentRef, "Sets the calibration multiplier", NULL);
+	CMD_RegisterCommand("PowerSet",BL0942_PowerSet, NULL);
+	CMD_RegisterCommand("VoltageSet",BL0942_VoltageSet, NULL);
+	CMD_RegisterCommand("CurrentSet",BL0942_CurrentSet, NULL);
+	CMD_RegisterCommand("PREF",BL0942_PowerRef, NULL);
+	CMD_RegisterCommand("VREF",BL0942_VoltageRef, NULL);
+	CMD_RegisterCommand("IREF",BL0942_CurrentRef, NULL);
 }
 void BL0942_RunFrame() {
 	int len;

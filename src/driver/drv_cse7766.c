@@ -1,3 +1,4 @@
+// NOTE: this is the same as HLW8032
 #include "../new_common.h"
 #include "../new_pins.h"
 #include "../new_cfg.h"
@@ -198,12 +199,12 @@ int CSE7766_TryToGetNextCSE7766Packet() {
 	return CSE7766_PACKET_LEN;
 }
 
-int CSE7766_PowerSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t CSE7766_PowerSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	float realPower;
 
 	if(args==0||*args==0) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	realPower = atof(args);
 	CSE7766_PREF = realPower * raw_unscaled_power;
@@ -216,13 +217,13 @@ int CSE7766_PowerSet(const void *context, const char *cmd, const char *args, int
 		snprintf(dbg, sizeof(dbg),"PowerSet: you gave %f, set ref to %f\n", realPower, CSE7766_PREF);
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,dbg);
 	}
-	return 0;
+	return CMD_RES_OK;
 }
-int CSE7766_PowerRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t CSE7766_PowerRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
 
 	if(args==0||*args==0) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	CSE7766_PREF = atof(args);
 
@@ -231,38 +232,38 @@ int CSE7766_PowerRef(const void *context, const char *cmd, const char *args, int
 
 	return 0;
 }
-int CSE7766_CurrentRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t CSE7766_CurrentRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
 
 	if(args==0||*args==0) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	CSE7766_IREF = atof(args);
 
 	// UPDATE: now they are automatically saved
 	CFG_SetPowerMeasurementCalibrationFloat(CFG_OBK_CURRENT,CSE7766_IREF);
 
-	return 0;
+	return CMD_RES_OK;
 }
-int CSE7766_VoltageRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t CSE7766_VoltageRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
 
 	if(args==0||*args==0) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	CSE7766_UREF = atof(args);
 
 	// UPDATE: now they are automatically saved
 	CFG_SetPowerMeasurementCalibrationFloat(CFG_OBK_VOLTAGE,CSE7766_UREF);
 
-	return 0;
+	return CMD_RES_OK;
 }
-int CSE7766_VoltageSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t CSE7766_VoltageSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	float realV;
 
 	if(args==0||*args==0) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	realV = atof(args);
 	CSE7766_UREF = realV * raw_unscaled_voltage;
@@ -276,14 +277,14 @@ int CSE7766_VoltageSet(const void *context, const char *cmd, const char *args, i
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,dbg);
 	}
 
-	return 0;
+	return CMD_RES_OK;
 }
-int CSE7766_CurrentSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
+commandResult_t CSE7766_CurrentSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	float realI;
 
 	if(args==0||*args==0) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return 1;
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	realI = atof(args);
 	CSE7766_IREF = realI * raw_unscaled_current;
@@ -296,7 +297,7 @@ int CSE7766_CurrentSet(const void *context, const char *cmd, const char *args, i
 		snprintf(dbg, sizeof(dbg),"CurrentSet: you gave %f, set ref to %f\n", realI, CSE7766_IREF);
 		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,dbg);
 	}
-	return 0;
+	return CMD_RES_OK;
 }
 void CSE7766_Init() 
 {
@@ -309,12 +310,12 @@ void CSE7766_Init()
 
 	UART_InitUART(CSE7766_BAUD_RATE);
 	UART_InitReceiveRingBuffer(512);
-	CMD_RegisterCommand("PowerSet","",CSE7766_PowerSet, "Sets current power value for calibration", NULL);
-	CMD_RegisterCommand("VoltageSet","",CSE7766_VoltageSet, "Sets current V value for calibration", NULL);
-	CMD_RegisterCommand("CurrentSet","",CSE7766_CurrentSet, "Sets current I value for calibration", NULL);
-	CMD_RegisterCommand("PREF","",CSE7766_PowerRef, "Sets the calibration multiplier", NULL);
-	CMD_RegisterCommand("VREF","",CSE7766_VoltageRef, "Sets the calibration multiplier", NULL);
-	CMD_RegisterCommand("IREF","",CSE7766_CurrentRef, "Sets the calibration multiplier", NULL);
+	CMD_RegisterCommand("PowerSet",CSE7766_PowerSet, NULL);
+	CMD_RegisterCommand("VoltageSet",CSE7766_VoltageSet, NULL);
+	CMD_RegisterCommand("CurrentSet",CSE7766_CurrentSet, NULL);
+	CMD_RegisterCommand("PREF",CSE7766_PowerRef, NULL);
+	CMD_RegisterCommand("VREF",CSE7766_VoltageRef, NULL);
+	CMD_RegisterCommand("IREF",CSE7766_CurrentRef, NULL);
 }
 
 void CSE7766_RunFrame() {

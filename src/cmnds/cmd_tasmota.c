@@ -5,7 +5,8 @@
 #include <ctype.h>
 #include "cmd_local.h"
 #include "../new_pins.h"
-#ifdef BK_LITTLEFS
+#include "../new_cfg.h"
+#ifdef ENABLE_LITTLEFS
 	#include "../littlefs/our_lfs.h"
 #endif
 
@@ -19,7 +20,7 @@ int parsePowerArgument(const char *s) {
 	return atoi(s);
 }
 
-static int power(const void *context, const char *cmd, const char *args, int cmdFlags){
+static commandResult_t power(const void *context, const char *cmd, const char *args, int cmdFlags){
 	//if (!wal_strnicmp(cmd, "POWER", 5)){
 		int channel = 0;
 		int iVal = 0;
@@ -68,18 +69,21 @@ static int power(const void *context, const char *cmd, const char *args, int cmd
 #endif
 		if(args == 0 || *args == 0) {
 			// this should only check status
+		}
+		else if (!stricmp(args, "STATUS")) {
+			// this should only check status
 		} else if(!stricmp(args,"TOGGLE")) {
 			CHANNEL_Toggle(channel);
 		} else {
 			iVal = parsePowerArgument(args);
 			CHANNEL_Set(channel, iVal, false);
 		}
-		return 1;
+		return CMD_RES_OK;
 	//}
 	//return 0;
 }
 
-static int powerAll(const void *context, const char *cmd, const char *args, int cmdFlags){
+static commandResult_t powerAll(const void *context, const char *cmd, const char *args, int cmdFlags){
 	//if (!wal_strnicmp(cmd, "POWERALL", 8)){
 		int iVal = 0;
 
@@ -88,27 +92,13 @@ static int powerAll(const void *context, const char *cmd, const char *args, int 
 		iVal = parsePowerArgument(args);
 
 		CHANNEL_SetAll(iVal, false);
-		return 1;
+		return CMD_RES_OK;
 	//}
 	//return 0;
 }
 
 
-static int powerStateOnly(const void *context, const char *cmd, const char *args, int cmdFlags){
-	//if (!wal_strnicmp(cmd, "POWERALL", 8)){
-		int iVal = 0;
-
-        ADDLOG_INFO(LOG_FEATURE_CMD, "tasCmnd powerStateOnly (%s) received with args %s",cmd,args);
-
-		iVal = parsePowerArgument(args);
-
-		CHANNEL_SetStateOnly(iVal);
-		return 1;
-	//}
-	//return 0;
-}
-
-static int color(const void *context, const char *cmd, const char *args, int cmdFlags){
+static commandResult_t color(const void *context, const char *cmd, const char *args, int cmdFlags){
    // if (!wal_strnicmp(cmd, "COLOR", 5)){
         if (args[0] != '#'){
             ADDLOG_ERROR(LOG_FEATURE_CMD, "tasCmnd COLOR expected a # prefixed color, you sent %s",args);
@@ -152,13 +142,13 @@ static int color(const void *context, const char *cmd, const char *args, int cmd
               //  ADDLOG_DEBUG(LOG_FEATURE_CMD, "COLOR arg ended");
             }
         }
-        return 1;
+        return CMD_RES_OK;
   //  }
    // return 0;
 }
 
 
-static int cmnd_backlog(const void * context, const char *cmd, const char *args, int cmdFlags){
+static commandResult_t cmnd_backlog(const void * context, const char *cmd, const char *args, int cmdFlags){
 	const char *subcmd;
 	const char *p;
 	int count = 0;
@@ -179,7 +169,7 @@ static int cmnd_backlog(const void * context, const char *cmd, const char *args,
 				break;
 			}
             *(c) = *(p++);
-            if (c - copy < 127){
+            if (c - copy < (sizeof(copy)-1)){
                 c++;
             }
 		}
@@ -190,14 +180,14 @@ static int cmnd_backlog(const void * context, const char *cmd, const char *args,
 	}
 	ADDLOG_DEBUG(LOG_FEATURE_CMD, "backlog executed %d", count);
 
-	return 1;
+	return CMD_RES_OK;
 }
 
 // Our wrapper for LFS.
 // Returns a buffer created with malloc.
 // You must free it later.
 byte *LFS_ReadFile(const char *fname) {
-#ifdef BK_LITTLEFS
+#ifdef ENABLE_LITTLEFS
 	if (lfs_present()){
 		lfs_file_t file;
 		int lfsres;
@@ -211,7 +201,7 @@ byte *LFS_ReadFile(const char *fname) {
 		lfsres = lfs_file_open(&lfs, &file, fname, LFS_O_RDONLY);
 
 		if (lfsres >= 0) {
-			ADDLOG_INFO(LOG_FEATURE_CMD, "LFS_ReadFile: openned file %s", fname);
+			ADDLOG_DEBUG(LOG_FEATURE_CMD, "LFS_ReadFile: openned file %s", fname);
 			//lfs_file_seek(&lfs,&file,0,LFS_SEEK_END);
 			//len = lfs_file_tell(&lfs,&file);
 			//lfs_file_seek(&lfs,&file,0,LFS_SEEK_SET);
@@ -255,11 +245,11 @@ byte *LFS_ReadFile(const char *fname) {
 				}
 #endif
 				res[len] = 0;
-				ADDLOG_INFO(LOG_FEATURE_CMD, "LFS_ReadFile: Loaded %i bytes\n",len);
+				ADDLOG_DEBUG(LOG_FEATURE_CMD, "LFS_ReadFile: Loaded %i bytes\n",len);
 				//ADDLOG_INFO(LOG_FEATURE_CMD, "LFS_ReadFile: Loaded %s\n",res);
 			}
 			lfs_file_close(&lfs, &file);
-			ADDLOG_INFO(LOG_FEATURE_CMD, "LFS_ReadFile: closed file %s", fname);
+			ADDLOG_DEBUG(LOG_FEATURE_CMD, "LFS_ReadFile: closed file %s", fname);
 			return res;
 		} else {
 			ADDLOG_INFO(LOG_FEATURE_CMD, "LFS_ReadFile: failed to file %s", fname);
@@ -271,8 +261,8 @@ byte *LFS_ReadFile(const char *fname) {
 	return 0;
 }
 
-static int cmnd_lfsexec(const void * context, const char *cmd, const char *args, int cmdFlags){
-#ifdef BK_LITTLEFS
+static commandResult_t cmnd_lfsexec(const void * context, const char *cmd, const char *args, int cmdFlags){
+#ifdef ENABLE_LITTLEFS
 	ADDLOG_DEBUG(LOG_FEATURE_CMD, "exec %s", args);
 	if (lfs_present()){
 		lfs_file_t *file = os_malloc(sizeof(lfs_file_t));
@@ -301,7 +291,9 @@ static int cmnd_lfsexec(const void * context, const char *cmd, const char *args,
 
 					if (lfsres >= 0){
 						if (*line && (*line != '#')){
-							CMD_ExecuteCommand(line, cmdFlags);
+							if (!(line[0] == '/' && line[1] == '/')) {
+								CMD_ExecuteCommand(line, cmdFlags);
+							}
 						}
 					}
 				} while (lfsres > 0);
@@ -318,104 +310,139 @@ static int cmnd_lfsexec(const void * context, const char *cmd, const char *args,
 		ADDLOG_ERROR(LOG_FEATURE_CMD, "lfs is absent");
 	}
 #endif
-	return 1;
+	return CMD_RES_OK;
 }
 
-
-// Usage for continous test: addRepeatingEvent 1 -1 lfs_test1 ir.bat
-static int cmnd_lfs_test1(const void * context, const char *cmd, const char *args, int cmdFlags){
-#ifdef BK_LITTLEFS
-	if (lfs_present()){
-		lfs_file_t file;
-		int lfsres;
-		char a;
-		int cnt;
-
-		cnt = 0;
-
-		memset(&file, 0, sizeof(lfs_file_t));
-		lfsres = lfs_file_open(&lfs, &file, args, LFS_O_RDONLY);
-
-		ADDLOG_INFO(LOG_FEATURE_CMD, "cmnd_lfs_test1: sizeof(lfs_file_t) %i", sizeof(lfs_file_t));
-		if (lfsres >= 0) {
-			ADDLOG_INFO(LOG_FEATURE_CMD, "cmnd_lfs_test1: openned file %s", args);
-			do {
-				lfsres = lfs_file_read(&lfs, &file, &a, 1);
-				cnt++;
-			} while (lfsres > 0) ;
-			ADDLOG_INFO(LOG_FEATURE_CMD, "cmnd_lfs_test1: Stopped at char %i\n",cnt);
-
-			lfs_file_close(&lfs, &file);
-			ADDLOG_INFO(LOG_FEATURE_CMD, "cmnd_lfs_test1: closed file %s", args);
-		} else {
-			ADDLOG_INFO(LOG_FEATURE_CMD, "cmnd_lfs_test1: failed to file %s", args);
-		}
-	} else {
-		ADDLOG_ERROR(LOG_FEATURE_CMD, "cmnd_lfs_test1: lfs is absent");
+static commandResult_t cmnd_SSID1(const void * context, const char *cmd, const char *args, int cmdFlags) {
+	Tokenizer_TokenizeString(args, TOKENIZER_ALLOW_QUOTES);
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 1)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
-#endif
-	return 1;
+	CFG_SetWiFiSSID(Tokenizer_GetArg(0));
+	return CMD_RES_OK;
 }
-// Usage for continous test: addRepeatingEvent 1 -1 lfs_test2 ir.bat
-static int cmnd_lfs_test2(const void * context, const char *cmd, const char *args, int cmdFlags){
-#ifdef BK_LITTLEFS
-	if (lfs_present()){
-		lfs_file_t *file;
-		int lfsres;
-		char a;
-		int cnt;
-
-		cnt = 0;
-
-		file = malloc(sizeof(lfs_file_t));
-		if(file == 0) {
-				ADDLOG_INFO(LOG_FEATURE_CMD, "cmnd_lfs_test2: failed to malloc for %s", args);
-		} else {
-			memset(file, 0, sizeof(lfs_file_t));
-			lfsres = lfs_file_open(&lfs, file, args, LFS_O_RDONLY);
-
-			ADDLOG_INFO(LOG_FEATURE_CMD, "cmnd_lfs_test2: sizeof(lfs_file_t) %i", sizeof(lfs_file_t));
-			if (lfsres >= 0) {
-				ADDLOG_INFO(LOG_FEATURE_CMD, "cmnd_lfs_test2: openned file %s", args);
-				do {
-					lfsres = lfs_file_read(&lfs, file, &a, 1);
-					cnt++;
-				} while (lfsres > 0) ;
-				ADDLOG_INFO(LOG_FEATURE_CMD, "cmnd_lfs_test2: Stopped at char %i\n",cnt);
-
-				lfs_file_close(&lfs, file);
-				ADDLOG_INFO(LOG_FEATURE_CMD, "cmnd_lfs_test2: closed file %s", args);
-			} else {
-				ADDLOG_INFO(LOG_FEATURE_CMD, "cmnd_lfs_test2: failed to file %s", args);
-			}
-			free(file);
-		}
-	} else {
-		ADDLOG_ERROR(LOG_FEATURE_CMD, "cmnd_lfs_test2: lfs is absent");
+static commandResult_t cmnd_Password1(const void * context, const char *cmd, const char *args, int cmdFlags) {
+	Tokenizer_TokenizeString(args, TOKENIZER_ALLOW_QUOTES);
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 1)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
-#endif
-	return 1;
+	CFG_SetWiFiPass(Tokenizer_GetArg(0));
+	return CMD_RES_OK;
 }
-// Usage for continous test: addRepeatingEvent 1 -1 lfs_test3 ir.bat
-static int cmnd_lfs_test3(const void * context, const char *cmd, const char *args, int cmdFlags){
-	byte *res;
-
-	res = LFS_ReadFile(args);
-
-	if(res) {
-		free(res);
+static commandResult_t cmnd_MqttHost(const void * context, const char *cmd, const char *args, int cmdFlags) {
+	Tokenizer_TokenizeString(args, TOKENIZER_ALLOW_QUOTES);
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 1)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
-	return 1;
+	CFG_SetMQTTHost(Tokenizer_GetArg(0));
+	return CMD_RES_OK;
+}
+static commandResult_t cmnd_MqttUser(const void * context, const char *cmd, const char *args, int cmdFlags) {
+	Tokenizer_TokenizeString(args, TOKENIZER_ALLOW_QUOTES);
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 1)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+	CFG_SetMQTTUserName(Tokenizer_GetArg(0));
+	return CMD_RES_OK;
+}
+static commandResult_t cmnd_MqttClient(const void * context, const char *cmd, const char *args, int cmdFlags) {
+	Tokenizer_TokenizeString(args, TOKENIZER_ALLOW_QUOTES);
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 1)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+	CFG_SetMQTTClientId(Tokenizer_GetArg(0));
+	return CMD_RES_OK;
+}
+static commandResult_t cmnd_State(const void * context, const char *cmd, const char *args, int cmdFlags) {
+
+	return CMD_RES_OK;
+}
+static commandResult_t cmnd_MqttPassword(const void * context, const char *cmd, const char *args, int cmdFlags) {
+	Tokenizer_TokenizeString(args, TOKENIZER_ALLOW_QUOTES);
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 1)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+	CFG_SetMQTTPass(Tokenizer_GetArg(0));
+	return CMD_RES_OK;
 }
 int taslike_commands_init(){
-    CMD_RegisterCommand("power", "", power, "set output POWERn 0..100", NULL);
-    CMD_RegisterCommand("powerStateOnly", "", powerStateOnly, "ensures that device is on or off without changing pwm values", NULL);
-    CMD_RegisterCommand("powerAll", "", powerAll, "set all outputs", NULL);
-    CMD_RegisterCommand("color", "", color, "set PWN color using #RRGGBB[cw][ww]", NULL);
-	CMD_RegisterCommand("backlog", "", cmnd_backlog, "run a sequence of ; separated commands", NULL);
-	CMD_RegisterCommand("exec", "", cmnd_lfsexec, "exec <file> - run autoexec.bat or other file from LFS if present", NULL);
-	CMD_RegisterCommand("lfs_test1", "", cmnd_lfs_test1, "", NULL);
-	CMD_RegisterCommand("lfs_test2", "", cmnd_lfs_test2, "", NULL);
-	CMD_RegisterCommand("lfs_test3", "", cmnd_lfs_test3, "", NULL);
+	//cmddetail:{"name":"power","args":"[OnorOfforToggle]",
+	//cmddetail:"descr":"Tasmota-style POWER command. Should work for both LEDs and relay-based devices. You can write POWER0, POWER1, etc to access specific relays.",
+	//cmddetail:"fn":"power","file":"cmnds/cmd_tasmota.c","requires":"",
+	//cmddetail:"examples":""}
+    CMD_RegisterCommand("power", power, NULL);
+	//cmddetail:{"name":"powerAll","args":"",
+	//cmddetail:"descr":"set all outputs",
+	//cmddetail:"fn":"powerAll","file":"cmnds/cmd_tasmota.c","requires":"",
+	//cmddetail:"examples":""}
+    CMD_RegisterCommand("powerAll", powerAll, NULL);
+	//cmddetail:{"name":"color","args":"[HexString]",
+	//cmddetail:"descr":"set PWN color using #RRGGBB[cw][ww]. Do not use it. Use led_basecolor_rgb",
+	//cmddetail:"fn":"color","file":"cmnds/cmd_tasmota.c","requires":"",
+	//cmddetail:"examples":""}
+    CMD_RegisterCommand("color", color, NULL);
+	//cmddetail:{"name":"backlog","args":"[string of commands separated with ;]",
+	//cmddetail:"descr":"run a sequence of ; separated commands",
+	//cmddetail:"fn":"cmnd_backlog","file":"cmnds/cmd_tasmota.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("backlog", cmnd_backlog, NULL);
+	//cmddetail:{"name":"exec","args":"[Filename]",
+	//cmddetail:"descr":"exec <file> - run autoexec.bat or other file from LFS if present",
+	//cmddetail:"fn":"cmnd_lfsexec","file":"cmnds/cmd_tasmota.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("exec", cmnd_lfsexec, NULL);
+	//cmddetail:{"name":"SSID1","args":"[ValueString]",
+	//cmddetail:"descr":"Sets the SSID of target WiFi. Command keeps Tasmota syntax.",
+	//cmddetail:"fn":"cmnd_SSID1","file":"cmnds/cmd_tasmota.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("SSID1", cmnd_SSID1, NULL);
+	//cmddetail:{"name":"Password1","args":"[ValueString]",
+	//cmddetail:"descr":"Sets the Pass of target WiFi. Command keeps Tasmota syntax",
+	//cmddetail:"fn":"cmnd_Password1","file":"cmnds/cmd_tasmota.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("Password1", cmnd_Password1, NULL);
+	//cmddetail:{"name":"MqttHost","args":"[ValueString]",
+	//cmddetail:"descr":"Sets the MQTT host. Command keeps Tasmota syntax",
+	//cmddetail:"fn":"cmnd_MqttHost","file":"cmnds/cmd_tasmota.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("MqttHost", cmnd_MqttHost, NULL);
+	//cmddetail:{"name":"MqttUser","args":"[ValueString]",
+	//cmddetail:"descr":"Sets the MQTT user. Command keeps Tasmota syntax",
+	//cmddetail:"fn":"cmnd_MqttUser","file":"cmnds/cmd_tasmota.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("MqttUser", cmnd_MqttUser, NULL);
+	//cmddetail:{"name":"MqttPassword","args":"[ValueString]",
+	//cmddetail:"descr":"Sets the MQTT pass. Command keeps Tasmota syntax",
+	//cmddetail:"fn":"cmnd_MqttPassword","file":"cmnds/cmd_tasmota.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("MqttPassword", cmnd_MqttPassword, NULL);
+	//cmddetail:{"name":"MqttClient","args":"[ValueString]",
+	//cmddetail:"descr":"Sets the MQTT client. Command keeps Tasmota syntax",
+	//cmddetail:"fn":"cmnd_MqttClient","file":"cmnds/cmd_tasmota.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("MqttClient", cmnd_MqttClient, NULL);
+	//cmddetail:{"name":"State","args":"NULL",
+	//cmddetail:"descr":"NULL",
+	//cmddetail:"fn":"cmnd_State","file":"cmnds/cmd_tasmota.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("State", cmnd_State, NULL);
     return 0;
 }

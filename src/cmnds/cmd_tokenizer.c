@@ -29,7 +29,16 @@ bool isWhiteSpace(char ch) {
 		return true;
 	if(ch == '\r')
 		return true;
+	// fix for https://www.elektroda.com/rtvforum/viewtopic.php?p=20420012#20420012
+	if (ch == 0xA0)
+		return true;
 	return false;
+}
+bool Tokenizer_CheckArgsCountAndPrintWarning(const char *cmdString, int reqCount) {
+	if (g_numArgs >= reqCount)
+		return false;
+	ADDLOG_ERROR(LOG_FEATURE_CMD, "Cant run '%s', expected at least %i args (given %i)", cmdString, reqCount, g_numArgs);
+	return true;
 }
 int Tokenizer_GetArgsCount() {
 	return g_numArgs;
@@ -153,8 +162,20 @@ void Tokenizer_TokenizeString(const char *s, int flags) {
 		return;
 	}
 
-	strcpy(g_buffer,s);
+	// not really needed, but nice for testing
+	memset(g_args, 0, sizeof(g_args));
+	memset(g_argsFrom, 0, sizeof(g_argsFrom));
+
+	if (flags & TOKENIZER_ALTERNATE_EXPAND_AT_START) {
+		CMD_ExpandConstantsWithinString(s, g_buffer, sizeof(g_buffer));
+	} else {
+		strcpy_safe(g_buffer, s, sizeof(g_buffer));
+	}
 	p = g_buffer;
+	// we need to rewrite this function and check it well with unit tests
+	if (*p == '"') {
+		goto quote;
+	}
 	g_args[g_numArgs] = p;
 	g_argsFrom[g_numArgs] = (s+(p-g_buffer));
 	g_numArgs++;
@@ -162,7 +183,7 @@ void Tokenizer_TokenizeString(const char *s, int flags) {
 		if(isWhiteSpace(*p)) {
 			*p = 0;
 			if(p[1] != 0 && isWhiteSpace(p[1])==false) {
-				// we need to rewrite this function
+				// we need to rewrite this function and check it well with unit tests
 				if(g_bAllowQuotes && p[1] == '"') { 
 					p++;
 					goto quote;
@@ -188,7 +209,6 @@ quote:
 			while(*p != 0) {
 				if(*p == '"') {
 					*p = 0;
-					p++;
 					break;
 				}
 				p++;

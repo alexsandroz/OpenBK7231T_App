@@ -62,32 +62,62 @@ typedef struct driver_s {
 	bool bLoaded;
 } driver_t;
 
+
 // startDriver BL0937
 static driver_t g_drivers[] = {
-	{ "TuyaMCU",	TuyaMCU_Init,		TuyaMCU_RunFrame,			NULL, NULL, NULL, NULL, false },
-	{ "NTP",		NTP_Init,			NTP_OnEverySecond,			NTP_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
-#if DRV_ENABLE_I2C
-	{ "I2C",		DRV_I2C_Init,		DRV_I2C_EverySecond,		NULL, NULL, NULL, NULL, false },
-#endif
-	//These 4 measure power
-	{ "BL0942",		BL0942_Init,		BL0942_RunFrame,			BL09XX_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
-	{ "BL0937",		BL0937_Init,		BL0937_RunFrame,			BL09XX_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
-	{ "CSE7766",	CSE7766_Init,		CSE7766_RunFrame,			BL09XX_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
 
-	//Test drivers
+#ifdef ENABLE_DRIVER_TUYAMCU
+	{ "TuyaMCU",	TuyaMCU_Init,		TuyaMCU_RunFrame,			NULL, NULL, NULL, NULL, false },
+	{ "tmSensor",	TuyaMCU_Sensor_Init, TuyaMCU_Sensor_RunFrame,	NULL, NULL, NULL, NULL, false },
+#endif
+
+#ifdef ENABLE_BASIC_DRIVERS
+	{ "NTP",		NTP_Init,			NTP_OnEverySecond,			NTP_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
 	{ "TESTPOWER",	Test_Power_Init,	 Test_Power_RunFrame,		BL09XX_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
 	{ "TESTLED",	Test_LED_Driver_Init, Test_LED_Driver_RunFrame, NULL, NULL, NULL, Test_LED_Driver_OnChannelChanged, false },
+	{ "HTTPButtons",	DRV_InitHTTPButtons, NULL, NULL, NULL, NULL, NULL, false },
+#endif
 
-#if PLATFORM_BEKEN
+#if ENABLE_I2C
+	{ "I2C",		DRV_I2C_Init,		DRV_I2C_EverySecond,		NULL, NULL, NULL, NULL, false },
+#endif
+
+#ifdef ENABLE_DRIVER_BL0942
+	{ "BL0942",		BL0942_Init,		BL0942_RunFrame,			BL09XX_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
+#endif
+
+#ifdef ENABLE_DRIVER_BL0937	
+	{ "BL0937",		BL0937_Init,		BL0937_RunFrame,			BL09XX_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
+#endif
+
+#ifdef ENABLE_DRIVER_CSE7766
+	{ "CSE7766",	CSE7766_Init,		CSE7766_RunFrame,			BL09XX_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
+#endif
+
+#if PLATFORM_BEKEN	
+	{ "SM16703P",	SM16703P_Init,		NULL,						NULL, NULL, NULL, NULL, false },
 	{ "IR",			DRV_IR_Init,		 NULL,						NULL, DRV_IR_RunFrame, NULL, NULL, false },
-	{ "DGR",		DRV_DGR_Init,		DRV_DGR_RunEverySecond,		NULL, DRV_DGR_RunQuickTick, DRV_DGR_Shutdown, DRV_DGR_OnChannelChanged, false },
+#endif
+#if defined(PLATFORM_BEKEN) || defined(WINDOWS)	
 	{ "DDP",		DRV_DDP_Init,		NULL,						NULL, DRV_DDP_RunFrame, DRV_DDP_Shutdown, NULL, false },
 	{ "SSDP",		DRV_SSDP_Init,		DRV_SSDP_RunEverySecond,	NULL, DRV_SSDP_RunQuickTick, DRV_SSDP_Shutdown, NULL, false },
+	{ "Wemo",		WEMO_Init,		NULL,		WEMO_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
+	{ "PWMToggler",	DRV_InitPWMToggler, NULL, DRV_Toggler_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
+	{ "DGR",		DRV_DGR_Init,		DRV_DGR_RunEverySecond,		NULL, DRV_DGR_RunQuickTick, DRV_DGR_Shutdown, DRV_DGR_OnChannelChanged, false },
 #endif
-	{ "SM2135",		SM2135_Init,		SM2135_RunFrame,			NULL, NULL, NULL, SM2135_OnChannelChanged, false },
-	{ "BP5758D",	BP5758D_Init,		BP5758D_RunFrame,			NULL, NULL, NULL, BP5758D_OnChannelChanged, false },
-	{ "BP1658CJ",	BP1658CJ_Init,		BP1658CJ_RunFrame,			NULL, NULL, NULL, BP1658CJ_OnChannelChanged, false },
-	{ "tmSensor",	TuyaMCU_Sensor_Init, TuyaMCU_Sensor_RunFrame,	NULL, NULL, NULL, NULL, false }
+
+#ifdef ENABLE_DRIVER_LED
+	{ "SM2135",		SM2135_Init,		NULL,			NULL, NULL, NULL, NULL, false },
+	{ "BP5758D",	BP5758D_Init,		NULL,			NULL, NULL, NULL, NULL, false },
+	{ "BP1658CJ",	BP1658CJ_Init,		NULL,			NULL, NULL, NULL, NULL, false },
+	{ "SM2235",		SM2235_Init,		NULL,			NULL, NULL, NULL, NULL, false },
+#endif	
+#if defined(PLATFORM_BEKEN) || defined(WINDOWS)
+	{ "CHT8305",	CHT8305_Init,		CHT8305_OnEverySecond,		CHT8305_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
+	{ "MAX72XX",	DRV_MAX72XX_Init,		NULL,		NULL, NULL, NULL, NULL, false },
+	{ "SHT3X",	SHT3X_Init,		NULL,		SHT3X_AppendInformationToHTTPIndexPage, NULL, SHT3X_StopDriver, NULL, false },
+#endif
+    { "Bridge",  Bridge_driver_Init, NULL,                       NULL, Bridge_driver_QuickFrame, Bridge_driver_DeInit, Bridge_driver_OnChannelChanged, false }
 };
 
 static const int g_numDrivers = sizeof(g_drivers) / sizeof(g_drivers[0]);
@@ -168,6 +198,15 @@ void DRV_OnChannelChanged(int channel, int iVal) {
 	}
 	//DRV_Mutex_Free();
 }
+// right now only used by simulator
+void DRV_ShutdownAllDrivers() {
+	int i;
+	for (i = 0; i < g_numDrivers; i++) {
+		if (g_drivers[i].bLoaded) {
+			DRV_StopDriver(g_drivers[i].name);
+		}
+	}
+}
 void DRV_StopDriver(const char* name) {
 	int i;
 
@@ -181,11 +220,11 @@ void DRV_StopDriver(const char* name) {
 					g_drivers[i].stopFunc();
 				}
 				g_drivers[i].bLoaded = false;
-				addLogAdv(LOG_INFO, LOG_FEATURE_MAIN, "Drv %s has been stopped.\n", name);
+				addLogAdv(LOG_INFO, LOG_FEATURE_MAIN, "Drv %s stopped.", name);
 				break;
 			}
 			else {
-				addLogAdv(LOG_INFO, LOG_FEATURE_MAIN, "Drv %s is not running.\n", name);
+				addLogAdv(LOG_INFO, LOG_FEATURE_MAIN, "Drv %s not running.", name);
 				break;
 			}
 		}
@@ -234,18 +273,43 @@ void DRV_StartDriver(const char* name) {
 // startDriver DGR
 // startDriver BL0942
 // startDriver BL0937
-static int DRV_Start(const void* context, const char* cmd, const char* args, int cmdFlags) {
-	DRV_StartDriver(args);
-	return 1;
+static commandResult_t DRV_Start(const void* context, const char* cmd, const char* args, int cmdFlags) {
+	Tokenizer_TokenizeString(args, 0);
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 1)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+
+	DRV_StartDriver(Tokenizer_GetArg(0));
+	return CMD_RES_OK;
 }
-static int DRV_Stop(const void* context, const char* cmd, const char* args, int cmdFlags) {
-	DRV_StopDriver(args);
-	return 1;
+static commandResult_t DRV_Stop(const void* context, const char* cmd, const char* args, int cmdFlags) {
+	Tokenizer_TokenizeString(args, 0);
+
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 1)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+
+	DRV_StopDriver(Tokenizer_GetArg(0));
+	return CMD_RES_OK;
 }
 
 void DRV_Generic_Init() {
-	CMD_RegisterCommand("startDriver", "", DRV_Start, "Starts driver", NULL);
-	CMD_RegisterCommand("stopDriver", "", DRV_Stop, "Stops driver", NULL);
+	//cmddetail:{"name":"startDriver","args":"[DriverName]",
+	//cmddetail:"descr":"Starts driver",
+	//cmddetail:"fn":"DRV_Start","file":"driver/drv_main.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("startDriver", DRV_Start, NULL);
+	//cmddetail:{"name":"stopDriver","args":"[DriverName]",
+	//cmddetail:"descr":"Stops driver",
+	//cmddetail:"fn":"DRV_Stop","file":"driver/drv_main.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("stopDriver", DRV_Stop, NULL);
 }
 void DRV_AppendInformationToHTTPIndexPage(http_request_t* request) {
 	int i, j;
