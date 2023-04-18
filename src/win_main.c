@@ -13,6 +13,7 @@
 #include "driver\drv_public.h"
 #include "cmnds\cmd_public.h"
 #include "httpserver\new_http.h"
+#include "hal\hal_flashVars.h"
 #include "new_pins.h"
 #include <timeapi.h>
 
@@ -106,23 +107,35 @@ void Sim_RunFrames(int n, bool bApplyRealtimeWait) {
 bool bObkStarted = false;
 void SIM_Hack_ClearSimulatedPinRoles();
 
-void SIM_ClearOBK() {
+
+void SIM_ClearOBK(const char *flashPath) {
 	if (bObkStarted) {
 		DRV_ShutdownAllDrivers();
-		LOG_DeInit();
 		release_lfs();
 		SIM_Hack_ClearSimulatedPinRoles();
 		WIN_ResetMQTT();
+		UART_ResetForSimulator();
 		CMD_ExecuteCommand("clearAll", 0);
 		CMD_ExecuteCommand("led_expoMode", 0);
-		Main_Init();
+		// LOG deinit after main init so commands will be re-added
+		LOG_DeInit();
 	}
-}
-void SIM_DoFreshOBKBoot() {
+	if (flashPath) {
+		SIM_SetupFlashFileReading(flashPath);
+	}
 	bObkStarted = true;
 	Main_Init();
 }
 void Win_DoUnitTests() {
+	Test_WaitFor();
+	Test_TwoPWMsOneChannel();
+	Test_ClockEvents();
+	Test_HassDiscovery();
+	Test_Role_ToggleAll_2();
+	Test_Demo_ButtonToggleGroup();
+	Test_Demo_ButtonScrollingChannelValues();
+	Test_CFG_Via_HTTP();
+	Test_Commands_Calendar();
 	Test_Commands_Generic();
 	Test_Demo_SimpleShuttersScript();
 	Test_Role_ToggleAll();
@@ -130,7 +143,6 @@ void Win_DoUnitTests() {
 	Test_Demo_MapFanSpeedToRelays();
 	Test_MapRanges();
 	Test_Demo_ExclusiveRelays();
-	Test_HassDiscovery();
 	Test_MultiplePinsOnChannel();
 	Test_Flags();
 	Test_DHT();
@@ -165,7 +177,7 @@ void Win_DoUnitTests() {
 	// Just to be sure
 	// Must be last step
 	// reset whole device
-	SIM_ClearOBK();
+	SIM_ClearOBK(0);
 }
 long g_delta;
 float SIM_GetDeltaTimeSeconds() {
@@ -192,6 +204,14 @@ int __cdecl main(int argc, char **argv)
 {
 	bool bWantsUnitTests = 1;
 
+	// clear debug data
+	if (1) {
+		FILE *f = fopen("sim_lastPublishes.txt", "wb");
+		if (f != 0) {
+			fprintf(f, "\n\n");
+			fclose(f);
+		}
+	}
 	if (argc > 1) {
 		int value;
 
@@ -203,7 +223,21 @@ int __cdecl main(int argc, char **argv)
 					if (i < argc && sscanf(argv[i], "%d", &value) == 1) {
 						g_port = value;
 					}
-				} else if (wal_strnicmp(argv[i] + 1, "runUnitTests", 12) == 0) {
+				} else if (wal_strnicmp(argv[i] + 1, "w", 1) == 0) {
+					i++;
+
+					if (i < argc && sscanf(argv[i], "%d", &value) == 1) {
+						SIM_SetWindowW(value);
+					}
+				}
+				else if (wal_strnicmp(argv[i] + 1, "h", 1) == 0) {
+					i++;
+
+					if (i < argc && sscanf(argv[i], "%d", &value) == 1) {
+						SIM_SetWindowH(value);
+					}
+				}
+				else if (wal_strnicmp(argv[i] + 1, "runUnitTests", 12) == 0) {
 					i++;
 
 					if (i < argc && sscanf(argv[i], "%d", &value) == 1) {
@@ -241,6 +275,10 @@ int __cdecl main(int argc, char **argv)
 	printf("sizeof(long double) = %d\n", (int)sizeof(long double));
 	printf("sizeof(led_corr_t) = %d\n", (int)sizeof(led_corr_t));
 	
+	if (sizeof(FLASH_VARS_STRUCTURE) != MAGIC_FLASHVARS_SIZE) {
+		printf("sizeof(FLASH_VARS_STRUCTURE) != MAGIC_FLASHVARS_SIZE!: %i\n", sizeof(FLASH_VARS_STRUCTURE));
+		system("pause");
+	}
 	if (sizeof(ledRemap_t) != MAGIC_LED_REMAP_SIZE) {
 		printf("sizeof(ledRemap_t) != MAGIC_LED_REMAP_SIZE!: %i\n", sizeof(ledRemap_t));
 		system("pause");
@@ -278,10 +316,12 @@ int __cdecl main(int argc, char **argv)
 		printf("OFFSETOF(mainConfig_t, version) != 0x00000004: %i\n", OFFSETOF(mainConfig_t, version));
 		system("pause");
 	}
-	
+	// Test expansion
+	//CMD_UART_Send_Hex(0,0,"FFAA$CH1$BB",0);
+
 	if (bWantsUnitTests) {
 		g_bDoingUnitTestsNow = 1;
-		SIM_DoFreshOBKBoot();
+		SIM_ClearOBK(0);
 		// let things warm up a little
 		Sim_RunFrames(50, false);
 		// run tests
@@ -292,7 +332,7 @@ int __cdecl main(int argc, char **argv)
 
 
 	SIM_CreateWindow(argc, argv);
-#if 0
+#if 1
 	CMD_ExecuteCommand("MQTTHost 192.168.0.113", 0);
 	CMD_ExecuteCommand("MqttPassword ma1oovoo0pooTie7koa8Eiwae9vohth1vool8ekaej8Voohi7beif5uMuph9Diex", 0);
 	CMD_ExecuteCommand("MqttClient WindowsOBK", 0);

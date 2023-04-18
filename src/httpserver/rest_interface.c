@@ -73,6 +73,9 @@ static int http_rest_app(http_request_t* request);
 static int http_rest_post_pins(http_request_t* request);
 static int http_rest_get_pins(http_request_t* request);
 
+static int http_rest_get_channelTypes(http_request_t* request);
+static int http_rest_post_channelTypes(http_request_t* request);
+
 static int http_rest_get_seriallog(http_request_t* request);
 
 static int http_rest_post_logconfig(http_request_t* request);
@@ -137,6 +140,9 @@ static int http_rest_get(http_request_t* request) {
 
 	if (!strcmp(request->url, "api/pins")) {
 		return http_rest_get_pins(request);
+	}
+	if (!strcmp(request->url, "api/channelTypes")) {
+		return http_rest_get_channelTypes(request);
 	}
 	if (!strcmp(request->url, "api/logconfig")) {
 		return http_rest_get_logconfig(request);
@@ -212,9 +218,12 @@ static int http_rest_post(http_request_t* request) {
 	if (!strcmp(request->url, "api/channels")) {
 		return http_rest_post_channels(request);
 	}
-
+	
 	if (!strcmp(request->url, "api/pins")) {
 		return http_rest_post_pins(request);
+	}
+	if (!strcmp(request->url, "api/channelTypes")) {
+		return http_rest_post_channelTypes(request);
 	}
 	if (!strcmp(request->url, "api/logconfig")) {
 		return http_rest_post_logconfig(request);
@@ -669,6 +678,38 @@ static int http_rest_get_pins(http_request_t* request) {
 }
 
 
+static int http_rest_get_channelTypes(http_request_t* request) {
+	int i;
+	int maxToPrint;
+
+	maxToPrint = 32;
+
+	http_setup(request, httpMimeTypeJson);
+	poststr(request, "{\"typenames\":[");
+	for (i = 0; i < ChType_Max; i++) {
+		if (i) {
+			hprintf255(request, ",\"%s\"", g_channelTypeNames[i]);
+		}
+		else {
+			hprintf255(request, "\"%s\"", g_channelTypeNames[i]);
+		}
+	}
+	poststr(request, "],\"types\":[");
+
+	for (i = 0; i < maxToPrint; i++) {
+		if (i) {
+			hprintf255(request, ",%d", g_cfg.pins.channelTypes[i]);
+		}
+		else {
+			hprintf255(request, "%d", g_cfg.pins.channelTypes[i]);
+		}
+	}
+	poststr(request, "]}");
+	poststr(request, NULL);
+	return 0;
+}
+
+
 
 ////////////////////////////
 // log config
@@ -782,11 +823,13 @@ static int http_rest_get_info(http_request_t* request) {
 	hprintf255(request, "\"build\":\"%s\",", g_build_str);
 	hprintf255(request, "\"ip\":\"%s\",", HAL_GetMyIPString());
 	hprintf255(request, "\"mac\":\"%s\",", HAL_GetMACStr(macstr));
+	hprintf255(request, "\"flags\":\"%ld\",", *((long int*)&g_cfg.genericFlags));
 	hprintf255(request, "\"mqtthost\":\"%s:%d\",", CFG_GetMQTTHost(), CFG_GetMQTTPort());
 	hprintf255(request, "\"mqtttopic\":\"%s\",", CFG_GetMQTTClientId());
 	hprintf255(request, "\"chipset\":\"%s\",", PLATFORM_MCU_NAME);
 	hprintf255(request, "\"webapp\":\"%s\",", CFG_GetWebappRoot());
-
+	
+	hprintf255(request, "\"startcmd\":\"%s\",", CFG_GetShortStartupCommand());
 #ifndef OBK_DISABLE_ALL_DRIVERS
 	hprintf255(request, "\"supportsSSDP\":%d,", DRV_IsRunning("SSDP") ? 1 : 0);
 #else
@@ -903,6 +946,84 @@ static int http_rest_post_pins(http_request_t* request) {
 				iChanged++;
 			}
 
+			i += t[i + 1].size + 1;
+		}
+		else {
+			ADDLOG_ERROR(LOG_FEATURE_API, "Unexpected key: %.*s", t[i].end - t[i].start,
+				json_str + t[i].start);
+		}
+	}
+	if (iChanged) {
+		CFG_Save_SetupTimer();
+		ADDLOG_DEBUG(LOG_FEATURE_API, "Changed %d - saved to flash", iChanged);
+	}
+
+	os_free(p);
+	os_free(t);
+	return http_rest_error(request, 200, "OK");
+}
+
+static int http_rest_post_channelTypes(http_request_t* request) {
+	int i;
+	int r;
+	char tmp[64];
+	int iChanged = 0;
+	char tokenStrValue[MAX_JSON_VALUE_LENGTH + 1];
+
+	//https://github.com/zserge/jsmn/blob/master/example/simple.c
+	//jsmn_parser p;
+	jsmn_parser* p = os_malloc(sizeof(jsmn_parser));
+	//jsmntok_t t[128]; /* We expect no more than 128 tokens */
+#define TOKEN_COUNT 128
+	jsmntok_t* t = os_malloc(sizeof(jsmntok_t) * TOKEN_COUNT);
+	char* json_str = request->bodystart;
+	int json_len = strlen(json_str);
+
+	memset(p, 0, sizeof(jsmn_parser));
+	memset(t, 0, sizeof(jsmntok_t) * TOKEN_COUNT);
+
+	jsmn_init(p);
+	r = jsmn_parse(p, json_str, json_len, t, TOKEN_COUNT);
+	if (r < 0) {
+		ADDLOG_ERROR(LOG_FEATURE_API, "Failed to parse JSON: %d", r);
+		sprintf(tmp, "Failed to parse JSON: %d\n", r);
+		os_free(p);
+		os_free(t);
+		return http_rest_error(request, 400, tmp);
+	}
+
+	/* Assume the top-level element is an object */
+	if (r < 1 || t[0].type != JSMN_OBJECT) {
+		ADDLOG_ERROR(LOG_FEATURE_API, "Object expected", r);
+		sprintf(tmp, "Object expected\n");
+		os_free(p);
+		os_free(t);
+		return http_rest_error(request, 400, tmp);
+	}
+
+	/* Loop over all keys of the root object */
+	for (i = 1; i < r; i++) {
+		if (tryGetTokenString(json_str, &t[i], tokenStrValue) != true) {
+			ADDLOG_DEBUG(LOG_FEATURE_API, "Parsing failed");
+			continue;
+		}
+		//ADDLOG_DEBUG(LOG_FEATURE_API, "parsed %s", tokenStrValue);
+
+		if (strcmp(tokenStrValue, "types") == 0) {
+			int j;
+			if (t[i + 1].type != JSMN_ARRAY) {
+				continue; /* We expect groups to be an array of strings */
+			}
+			for (j = 0; j < t[i + 1].size; j++) {
+				int typeval, pr;
+				jsmntok_t* g = &t[i + j + 2];
+				typeval = atoi(json_str + g->start);
+				pr = CHANNEL_GetType(j);
+				if (pr != typeval) {
+					CHANNEL_SetType(j, typeval);
+					iChanged++;
+				}
+			}
 			i += t[i + 1].size + 1;
 		}
 		else {
@@ -1562,9 +1683,38 @@ static int http_rest_post_channels(http_request_t* request) {
 }
 
 
+
 static int http_rest_post_cmd(http_request_t* request) {
-	char* cmd = request->bodystart;
-	CMD_ExecuteCommand(cmd, COMMAND_FLAG_SOURCE_CONSOLE);
-	return http_rest_error(request, 200, "OK");
+	commandResult_t res;
+	int code;
+	const char *reply;
+	const char *type;
+	const char* cmd = request->bodystart;
+	res = CMD_ExecuteCommand(cmd, COMMAND_FLAG_SOURCE_CONSOLE);
+	reply = CMD_GetResultString(res);
+	if (1) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_CMD, "[WebApp Cmd '%s' Result] %s", cmd, reply);
+	}
+	if (res != CMD_RES_OK) {
+		type = "error";
+		if (res == CMD_RES_UNKNOWN_COMMAND) {
+			code = 501;
+		}
+		else {
+			code = 400;
+		}
+	}
+	else {
+		type = "success";
+		code = 200;
+	}
+
+	request->responseCode = code;
+	http_setup(request, httpMimeTypeJson);
+	hprintf255(request, "{\"%s\":%d, \"msg\":\"%s\", \"res\":", type, code, reply);
+	JSON_ProcessCommandReply(cmd, skipToNextWord(cmd), request, (jsonCb_t)hprintf255, COMMAND_FLAG_SOURCE_HTTP);
+	hprintf255(request, "}", code, reply);
+	poststr(request, NULL);
+	return 0;
 }
 

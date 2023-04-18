@@ -1,20 +1,19 @@
-#include "../new_common.h"
-#include "../new_pins.h"
+#include "drv_bl_shared.h"
+
 #include "../new_cfg.h"
-// Commands register, execution API and cmd tokenizer
-#include "../cmnds/cmd_public.h"
-#include "../mqtt/new_mqtt.h"
-#include "../logging/logging.h"
-#include "drv_public.h"
-#include "drv_local.h"
-#include "drv_uart.h"
-#include "../httpserver/new_http.h"
+#include "../new_pins.h"
 #include "../cJSON/cJSON.h"
-#include <time.h>
-#include "drv_ntp.h"
 #include "../hal/hal_flashVars.h"
+#include "../logging/logging.h"
+#include "../mqtt/new_mqtt.h"
 #include "../ota/ota.h"
+#include "drv_local.h"
+#include "drv_ntp.h"
+#include "drv_public.h"
+#include "drv_uart.h"
+
 #include <math.h>
+#include <time.h>
 
 #define DAILY_STATS_LENGTH 4
 
@@ -23,6 +22,7 @@ int stat_updatesSent = 0;
 
 // Current values
 float lastReadings[OBK_NUM_MEASUREMENTS];
+float lastReadingFrequency = 0.0f;
 //
 // Variables below are for optimization
 // We can't send a full MQTT update every second.
@@ -68,6 +68,9 @@ float changeSendThresholds[OBK_NUM_MEASUREMENTS] = {
 
 int changeSendAlwaysFrames = 60;
 int changeDoNotSendMinFrames = 5;
+float g_apparentPower = 0;
+float g_powerFactor = 0;
+float g_reactivePower = 0;
 
 void BL09XX_AppendInformationToHTTPIndexPage(http_request_t *request)
 {
@@ -79,15 +82,66 @@ void BL09XX_AppendInformationToHTTPIndexPage(http_request_t *request)
         mode = "BL0937";
     } else if(DRV_IsRunning("BL0942")) {
         mode = "BL0942";
+    } else if (DRV_IsRunning("BL0942SPI")) {
+        mode = "BL0942SPI";
     } else if(DRV_IsRunning("CSE7766")) {
         mode = "CSE7766";
     } else {
         mode = "PWR";
     }
-	
-    hprintf255(request,"<h2>%s Voltage=%f, Current=%f, Power=%f",mode, lastReadings[OBK_VOLTAGE],lastReadings[OBK_CURRENT], lastReadings[OBK_POWER]);
-    hprintf255(request,", Total Consumption=%1.1f Wh (changes sent %i, skipped %i, saved %li)</h2>",energyCounter, stat_updatesSent, stat_updatesSkipped, 
-               ConsumptionSaveCounter);
+
+    poststr(request, "<hr><table style='width:100%'>");
+
+    if (lastReadingFrequency > 0) {
+        poststr(request,
+                "<tr><td><b>Frequency</b></td><td style='text-align: right;'>");
+		hprintf255(request, "%.2f</td><td>Hz</td>", lastReadingFrequency);
+	}
+
+    poststr(request,
+            "<tr><td><b>Voltage</b></td><td style='text-align: right;'>");
+    hprintf255(request, "%.1f</td><td>V</td>", lastReadings[OBK_VOLTAGE]);
+
+    poststr(request,
+            "<tr><td><b>Current</b></td><td style='text-align: right;'>");
+    hprintf255(request, "%.3f</td><td>A</td>", lastReadings[OBK_CURRENT]);
+
+    poststr(request,
+            "<tr><td><b>Active Power</b></td><td style='text-align: right;'>");
+    hprintf255(request, "%.1f</td><td>W</td>", lastReadings[OBK_POWER]);
+
+    poststr(
+        request,
+        "<tr><td><b>Apparent Power</b></td><td style='text-align: right;'>");
+    hprintf255(request, "%.1f</td><td>VA</td>", g_apparentPower);
+
+    poststr(
+        request,
+        "<tr><td><b>Reactive Power</b></td><td style='text-align: right;'>");
+    hprintf255(request, "%.1f</td><td>var</td>", g_reactivePower);
+
+    poststr(request,
+            "<tr><td><b>Power Factor</b></td><td style='text-align: right;'>");
+    hprintf255(request, "%.2f</td><td></td>", g_powerFactor);
+
+    if (NTP_IsTimeSynced()) {
+        poststr(request, "<tr><td><b>Energy Today</b></td><td "
+                         "style='text-align: right;'>");
+        hprintf255(request, "%.1f</td><td>Wh</td>", dailyStats[0]);
+
+        poststr(request, "<tr><td><b>Energy Yesterday</b></td><td "
+                         "style='text-align: right;'>");
+        hprintf255(request, "%.1f</td><td>Wh</td>", dailyStats[1]);
+    }
+    poststr(request,
+            "<tr><td><b>Energy Total</b></td><td style='text-align: right;'>");
+    hprintf255(request, "%.3f</td><td>kWh</td>", energyCounter / 1000.0f);
+
+    poststr(request, "</table>");
+
+    hprintf255(request, "(changes sent %i, skipped %i, saved %li) - %s<hr>",
+               stat_updatesSent, stat_updatesSkipped, ConsumptionSaveCounter,
+               mode);
 
     if (energyCounterStatsEnable == true)
     {
@@ -299,6 +353,39 @@ commandResult_t BL09XX_SetupEnergyStatistic(const void *context, const char *cmd
     return CMD_RES_OK;
 }
 
+commandResult_t BL09XX_VCPPublishIntervals(const void *context, const char *cmd, const char *args, int cmdFlags)
+{
+	Tokenizer_TokenizeString(args, 0);
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 2)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+
+	changeDoNotSendMinFrames = Tokenizer_GetArgInteger(0);
+	changeSendAlwaysFrames = Tokenizer_GetArgInteger(1);
+
+	return CMD_RES_OK;
+}
+commandResult_t BL09XX_VCPPublishThreshold(const void *context, const char *cmd, const char *args, int cmdFlags)
+{
+	Tokenizer_TokenizeString(args, 0);
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 3)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+
+	changeSendThresholds[OBK_VOLTAGE] = Tokenizer_GetArgFloat(0);
+	changeSendThresholds[OBK_CURRENT] = Tokenizer_GetArgFloat(1);
+	changeSendThresholds[OBK_POWER] = Tokenizer_GetArgFloat(2);
+	if (Tokenizer_GetArgsCount() >= 4)
+		changeSendThresholdEnergy = Tokenizer_GetArgFloat(3);
+
+	return CMD_RES_OK;
+}
 commandResult_t BL09XX_SetupConsumptionThreshold(const void *context, const char *cmd, const char *args, int cmdFlags)
 {
     float threshold;
@@ -321,8 +408,35 @@ commandResult_t BL09XX_SetupConsumptionThreshold(const void *context, const char
 
     return CMD_RES_OK;
 }
+bool Channel_AreAllRelaysOpen() {
+	int i, role, ch;
 
-void BL_ProcessUpdate(float voltage, float current, float power) 
+	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
+		role = g_cfg.pins.roles[i];
+		ch = g_cfg.pins.channels[i];
+		if (role == IOR_Relay) {
+			// this channel is high = relay is set
+			if (CHANNEL_Get(ch)) {
+				return false;
+			}
+		}
+		if (role == IOR_Relay_n) {
+			// this channel is low = relay_n is set
+			if (CHANNEL_Get(ch)==false) {
+				return false;
+			}
+		}
+		if (role == IOR_BridgeForward) {
+			// this channel is high = relay is set
+			if (CHANNEL_Get(ch)) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+void BL_ProcessUpdate(float voltage, float current, float power,
+					  float frequency) 
 {
     int i;
     float energy;    
@@ -331,9 +445,10 @@ void BL_ProcessUpdate(float voltage, float current, float power)
     cJSON* stats;
     char *msg;
     portTickType interval;
-    time_t g_time;
+    time_t ntpTime;
     struct tm *ltm;
     char datetime[64];
+	float diff;
 
 	// I had reports that BL0942 sometimes gives 
 	// a large, negative peak of current/power
@@ -346,12 +461,31 @@ void BL_ProcessUpdate(float voltage, float current, float power)
 		if (current < 0.0f)
 			current = 0.0f;
 	}
+	if (CFG_HasFlag(OBK_FLAG_POWER_FORCE_ZERO_IF_RELAYS_OPEN))
+	{
+		if (Channel_AreAllRelaysOpen()) {
+			power = 0;
+			current = 0;
+		}
+	}
 
     // those are final values, like 230V
     lastReadings[OBK_POWER] = power;
     lastReadings[OBK_VOLTAGE] = voltage;
     lastReadings[OBK_CURRENT] = current;
-    
+    lastReadingFrequency = frequency;
+
+	g_apparentPower =
+		lastReadings[OBK_VOLTAGE] * lastReadings[OBK_CURRENT];
+
+	g_reactivePower = (g_apparentPower <= fabsf(lastReadings[OBK_POWER])
+		? 0
+		: sqrtf(powf(g_apparentPower, 2) -
+			powf(lastReadings[OBK_POWER], 2)));
+
+	g_powerFactor =
+		(g_apparentPower == 0 ? 1 : lastReadings[OBK_POWER] / g_apparentPower);
+
     xPassedTicks = (int)(xTaskGetTickCount() - energyCounterStamp);
     if (xPassedTicks <= 0)
         xPassedTicks = 1;
@@ -369,10 +503,10 @@ void BL_ProcessUpdate(float voltage, float current, float power)
     
     if(NTP_IsTimeSynced() == true) 
     {
-        g_time = (time_t)NTP_GetCurrentTime();
-        ltm = localtime(&g_time);
+        ntpTime = (time_t)NTP_GetCurrentTime();
+        ltm = localtime(&ntpTime);
         if (ConsumptionResetTime == 0)
-            ConsumptionResetTime = (time_t)g_time;
+            ConsumptionResetTime = (time_t)ntpTime;
 
         if (actual_mday == -1)
         {
@@ -380,10 +514,9 @@ void BL_ProcessUpdate(float voltage, float current, float power)
         }
         if (actual_mday != ltm->tm_mday)
         {
-            for(i = 7; i > 0; i--)
-            {
+            for (i = DAILY_STATS_LENGTH - 1; i > 0; i--)
                 dailyStats[i] = dailyStats[i - 1];
-            } 
+
             dailyStats[0] = 0.0;
             actual_mday = ltm->tm_mday;
             MQTT_PublishMain_StringFloat(counter_mqttNames[3], dailyStats[1]);
@@ -517,7 +650,11 @@ void BL_ProcessUpdate(float voltage, float current, float power)
     {
         // send update only if there was a big change or if certain time has passed
         // Do not send message with every measurement. 
-		float diff = fabs(lastSentValues[i] - lastReadings[i]);
+		diff = lastSentValues[i] - lastReadings[i];
+		// get absolute value
+		if (diff < 0)
+			diff = -diff;
+		// check for change
         if ( ((diff > changeSendThresholds[i]) &&
                (noChangeFrames[i] >= changeDoNotSendMinFrames)) ||
              (noChangeFrames[i] >= changeSendAlwaysFrames) )
@@ -545,7 +682,14 @@ void BL_ProcessUpdate(float voltage, float current, float power)
         }
     }
 
-    if ( (((energyCounter - lastSentEnergyCounterValue) >= changeSendThresholdEnergy) &&
+	// send update only if there was a big change or if certain time has passed
+	// Do not send message with every measurement. 
+	diff = energyCounter - lastSentEnergyCounterValue;
+	// get absolute value
+	if (diff < 0)
+		diff = -diff;
+	// check for change
+    if ( (((diff) >= changeSendThresholdEnergy) &&
           (noChangeFrameEnergyCounter >= changeDoNotSendMinFrames)) || 
          (noChangeFrameEnergyCounter >= changeSendAlwaysFrames) )
     {
@@ -595,7 +739,7 @@ void BL_ProcessUpdate(float voltage, float current, float power)
     }
 }
 
-void BL_Shared_Init()
+void BL_Shared_Init(void)
 {
     int i;
     ENERGY_METERING_DATA data;
@@ -647,20 +791,30 @@ void BL_Shared_Init()
     //int HAL_SetEnergyMeterStatus(ENERGY_METERING_DATA *data);
 
 	//cmddetail:{"name":"EnergyCntReset","args":"",
-	//cmddetail:"descr":"Reset Energy Counter",
+	//cmddetail:"descr":"Resets the total Energy Counter, the one that is usually kept after device reboots. After this commands, the counter will start again from 0.",
 	//cmddetail:"fn":"BL09XX_ResetEnergyCounter","file":"driver/drv_bl_shared.c","requires":"",
 	//cmddetail:"examples":""}
     CMD_RegisterCommand("EnergyCntReset", BL09XX_ResetEnergyCounter, NULL);
-	//cmddetail:{"name":"SetupEnergyStats","args":"[Enable1or0][SampleTime][SampleCount]",
-	//cmddetail:"descr":"Setup Energy Statistic Parameters: [enable<0|1>] [sample_time<10..900>] [sample_count<10..180>]",
+	//cmddetail:{"name":"SetupEnergyStats","args":"[Enable1or0][SampleTime][SampleCount][JSonEnable]",
+	//cmddetail:"descr":"Setup Energy Statistic Parameters: [enable<0|1>] [sample_time<10..900>] [sample_count<10..180>] [JsonEnable<0|1>]. JSONEnable is optional.",
 	//cmddetail:"fn":"BL09XX_SetupEnergyStatistic","file":"driver/drv_bl_shared.c","requires":"",
 	//cmddetail:"examples":""}
     CMD_RegisterCommand("SetupEnergyStats", BL09XX_SetupEnergyStatistic, NULL);
-	//cmddetail:{"name":"ConsumptionThresold","args":"[FloatValue]",
+	//cmddetail:{"name":"ConsumptionThreshold","args":"[FloatValue]",
 	//cmddetail:"descr":"Setup value for automatic save of consumption data [1..100]",
 	//cmddetail:"fn":"BL09XX_SetupConsumptionThreshold","file":"driver/drv_bl_shared.c","requires":"",
 	//cmddetail:"examples":""}
-    CMD_RegisterCommand("ConsumptionThresold", BL09XX_SetupConsumptionThreshold, NULL);
+    CMD_RegisterCommand("ConsumptionThreshold", BL09XX_SetupConsumptionThreshold, NULL);
+	//cmddetail:{"name":"VCPPublishThreshold","args":"[VoltageDeltaVolts][CurrentDeltaAmpers][PowerDeltaWats][EnergyDeltaWh]",
+	//cmddetail:"descr":"Sets the minimal change between previous reported value over MQTT and next reported value over MQTT. Very useful for BL0942, BL0937, etc. So, if you set, VCPPublishThreshold 0.5 0.001 0.5, it will only report voltage again if the delta from previous reported value is largen than 0.5V. Remember, that the device will also ALWAYS force-report values every N seconds (default 60)",
+	//cmddetail:"fn":"BL09XX_VCPPublishThreshold","file":"driver/drv_bl_shared.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("VCPPublishThreshold", BL09XX_VCPPublishThreshold, NULL);
+	//cmddetail:{"name":"VCPPublishIntervals","args":"[MinDelayBetweenPublishes][ForcedPublishInterval]",
+	//cmddetail:"descr":"First argument is minimal allowed interval in second between Voltage/Current/Power/Energy publishes (even if there is a large change), second value is an interval in which V/C/P/E is always published, even if there is no change",
+	//cmddetail:"fn":"BL09XX_VCPPublishIntervals","file":"driver/drv_bl_shared.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("VCPPublishIntervals", BL09XX_VCPPublishIntervals, NULL);
 }
 
 // OBK_POWER etc

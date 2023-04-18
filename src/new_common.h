@@ -98,10 +98,12 @@ This platform is not supported, error!
 #endif
 #endif
 
+
 #define BIT_SET(PIN,N) (PIN |=  (1<<N))
 #define BIT_CLEAR(PIN,N) (PIN &= ~(1<<N))
 #define BIT_TGL(PIN,N) (PIN ^=  (1<<N))
 #define BIT_CHECK(PIN,N) !!((PIN & (1<<N)))
+#define BIT_SET_TO(PIN,N, TG) if(TG) { BIT_SET(PIN,N); } else { BIT_CLEAR(PIN,N); }
 
 #ifndef MIN
 #define MIN(a,b)	(((a)<(b))?(a):(b))
@@ -220,6 +222,7 @@ OSStatus rtos_create_thread( beken_thread_t* thread,
 							beken_thread_function_t function,
 							uint32_t stack_size, beken_thread_arg_t arg );
 typedef unsigned int u32;
+		
 
 #elif PLATFORM_XR809
 
@@ -370,6 +373,7 @@ int wal_stricmp(const char *a, const char *b) ;
 
 #endif
 
+const char* skipToNextWord(const char* p);
 char *strdup(const char *s);
 int wal_stricmp(const char *a, const char *b);
 int wal_strnicmp(const char *a, const char *b, int count);
@@ -389,10 +393,10 @@ void Main_ScheduleHomeAssistantDiscovery(int seconds);
 int Main_IsConnectedToWiFi();
 int Main_IsOpenAccessPointMode();
 void Main_Init();
+bool Main_HasFastConnect();
 void Main_OnEverySecond();
 int Main_HasMQTTConnected();
 int Main_HasWiFiConnected();
-int Main_GetLastRebootBootFailures();
 void Main_OnPingCheckerReply(int ms);
 
 // new_ping.c
@@ -408,8 +412,9 @@ int LWIP_GetActiveSockets();
 //delay function do 10*r nops, because rtos_delay_milliseconds is too much
 void usleep(int r);
 
-// linear mapping function --> https://www.arduino.cc/reference/en/language/functions/math/map/
+#define RESTARTS_REQUIRED_FOR_SAFE_MODE 4
 
+// linear mapping function --> https://www.arduino.cc/reference/en/language/functions/math/map/
 #define MAP(x, in_min, in_max, out_min, out_max) (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 
 typedef enum lcdPrintType_e {
@@ -427,18 +432,23 @@ typedef enum
     EXCELLENT,
 } WIFI_RSSI_LEVEL;
 
+#define IP_STRING_FORMAT	"%hhu.%hhu.%hhu.%hhu"
+
 WIFI_RSSI_LEVEL wifi_rssi_scale(int8_t rssi_value);
 extern const char *str_rssi[];
 extern int bSafeMode;
+extern int g_bWantPinDeepSleep;
 extern int g_timeSinceLastPingReply;
 extern int g_startPingWatchDogAfter;
-
+extern int g_openAP;
+extern int g_bootFailures;
 
 typedef int(*jsonCb_t)(void *userData, const char *fmt, ...);
 int JSON_ProcessCommandReply(const char *cmd, const char *args, void *request, jsonCb_t printer, int flags);
 void ScheduleDriverStart(const char *name, int delay);
 bool isWhiteSpace(char ch);
-
+void convert_IP_to_string(char *o, unsigned char *ip);
+int str_to_ip(const char *s, byte *ip);
 
 #endif /* __NEW_COMMON_H__ */
 

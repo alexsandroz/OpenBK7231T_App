@@ -70,8 +70,8 @@ float rgb_used_corr[3];   // RGB correction currently used
 int g_lightEnableAll = 0;
 
 // the slider control in the UI emits values
-//in the range from 154-500 (defined
-//in homeassistant/util/color.py as HASS_COLOR_MIN and HASS_COLOR_MAX).
+// in the range from 154-500 (defined
+// in homeassistant/util/color.py as HASS_COLOR_MIN and HASS_COLOR_MAX).
 float led_temperature_min = HASS_TEMPERATURE_MIN;
 float led_temperature_max = HASS_TEMPERATURE_MAX;
 float led_temperature_current = HASS_TEMPERATURE_MIN;
@@ -112,8 +112,15 @@ bool LED_IsLEDRunning()
 	if (LED_IsLedDriverChipRunning())
 		return true;
 
-	pwmCount = PIN_CountPinsWithRoleOrRole(IOR_PWM, IOR_PWM_n);
+	//pwmCount = PIN_CountPinsWithRoleOrRole(IOR_PWM, IOR_PWM_n);
+	// This will treat multiple PWMs on a single channel as one.
+	// Thanks to this users can turn for example RGB LED controller
+	// into high power 3-outputs single colors LED controller
+	PIN_get_Relay_PWM_Count(0, &pwmCount, 0);
+
 	if (pwmCount > 0)
+		return true;	
+	if (CFG_HasFlag(OBK_FLAG_LED_FORCESHOWRGBCWCONTROLLER))
 		return true;
 	return false;
 }
@@ -121,7 +128,11 @@ bool LED_IsLEDRunning()
 int isCWMode() {
 	int pwmCount;
 
-	pwmCount = PIN_CountPinsWithRoleOrRole(IOR_PWM, IOR_PWM_n);
+	//pwmCount = PIN_CountPinsWithRoleOrRole(IOR_PWM, IOR_PWM_n);
+	// This will treat multiple PWMs on a single channel as one.
+	// Thanks to this users can turn for example RGB LED controller
+	// into high power 3-outputs single colors LED controller
+	PIN_get_Relay_PWM_Count(0, &pwmCount, 0);
 
 	if(pwmCount == 2)
 		return 1;
@@ -136,8 +147,15 @@ int shouldSendRGB() {
 	// This flag also could be used for dummy Device Groups driver-module
 	if(CFG_HasFlag(OBK_FLAG_LED_FORCESHOWRGBCWCONTROLLER))
 		return 1;
+	// assume that LED driver = RGB (at least), usually RGBCW
+	if (LED_IsLedDriverChipRunning())
+		return true;
 
-	pwmCount = PIN_CountPinsWithRoleOrRole(IOR_PWM, IOR_PWM_n);
+	//pwmCount = PIN_CountPinsWithRoleOrRole(IOR_PWM, IOR_PWM_n);
+	// This will treat multiple PWMs on a single channel as one.
+	// Thanks to this users can turn for example RGB LED controller
+	// into high power 3-outputs single colors LED controller
+	PIN_get_Relay_PWM_Count(0, &pwmCount, 0);
 
 	// single colors and CW don't send rgb
 	if(pwmCount <= 2)
@@ -187,8 +205,33 @@ float led_lerpSpeedUnitsPerSecond = 200.f;
 float led_current_value_brightness = 0;
 float led_current_value_cold_or_warm = 0;
 
+
+void LED_CalculateEmulatedCool(float inCool, float *outRGB) {
+	outRGB[0] = inCool;
+	outRGB[1] = inCool;
+	outRGB[2] = inCool;
+}
+
+void LED_ApplyEmulatedCool(int firstChannelIndex, float chVal) {
+	float rgb[3];
+	LED_CalculateEmulatedCool(chVal, rgb);
+	CHANNEL_Set_FloatPWM(firstChannelIndex + 0, rgb[0], CHANNEL_SET_FLAG_SKIP_MQTT | CHANNEL_SET_FLAG_SILENT);
+	CHANNEL_Set_FloatPWM(firstChannelIndex + 1, rgb[1], CHANNEL_SET_FLAG_SKIP_MQTT | CHANNEL_SET_FLAG_SILENT);
+	CHANNEL_Set_FloatPWM(firstChannelIndex + 2, rgb[2], CHANNEL_SET_FLAG_SKIP_MQTT | CHANNEL_SET_FLAG_SILENT);
+}
+
 void LED_I2CDriver_WriteRGBCW(float* finalRGBCW) {
 #ifdef ENABLE_DRIVER_LED
+	if (CFG_HasFlag(OBK_FLAG_LED_EMULATE_COOL_WITH_RGB)) {
+		if (g_lightMode == Light_Temperature) {
+			// the format is RGBCW
+			// Emulate C with RGB
+			LED_CalculateEmulatedCool(finalRGBCW[3], finalRGBCW);
+			// C is unused
+			finalRGBCW[3] = 0;
+			// keep W unchanged
+		}
+	}
 	if (DRV_IsRunning("SM2135")) {
 		SM2135_Write(finalRGBCW);
 	}
@@ -275,9 +318,7 @@ void LED_RunQuickColorLerp(int deltaMS) {
 				// emulated cool is -1 by default, so this block will only execute
 				// if the cool emulation was enabled
 				if (channelToUse == emulatedCool && g_lightMode == Light_Temperature) {
-					CHANNEL_Set_FloatPWM(firstChannelIndex + 0, chVal, CHANNEL_SET_FLAG_SKIP_MQTT | CHANNEL_SET_FLAG_SILENT);
-					CHANNEL_Set_FloatPWM(firstChannelIndex + 1, chVal, CHANNEL_SET_FLAG_SKIP_MQTT | CHANNEL_SET_FLAG_SILENT);
-					CHANNEL_Set_FloatPWM(firstChannelIndex + 2, chVal, CHANNEL_SET_FLAG_SKIP_MQTT | CHANNEL_SET_FLAG_SILENT);
+					LED_ApplyEmulatedCool(firstChannelIndex, chVal);
 				}
 				else {
 					if (CFG_HasFlag(OBK_FLAG_LED_ALTERNATE_CW_MODE)) {
@@ -450,9 +491,7 @@ void apply_smart_light() {
 					// emulated cool is -1 by default, so this block will only execute
 					// if the cool emulation was enabled
 					if (channelToUse == emulatedCool && g_lightMode == Light_Temperature) {
-						CHANNEL_Set_FloatPWM(firstChannelIndex + 0, chVal, CHANNEL_SET_FLAG_SKIP_MQTT | CHANNEL_SET_FLAG_SILENT);
-						CHANNEL_Set_FloatPWM(firstChannelIndex + 1, chVal, CHANNEL_SET_FLAG_SKIP_MQTT | CHANNEL_SET_FLAG_SILENT);
-						CHANNEL_Set_FloatPWM(firstChannelIndex + 2, chVal, CHANNEL_SET_FLAG_SKIP_MQTT | CHANNEL_SET_FLAG_SILENT);
+						LED_ApplyEmulatedCool(firstChannelIndex, chVal);
 					}
 					else {
 						if (CFG_HasFlag(OBK_FLAG_LED_ALTERNATE_CW_MODE)) {
@@ -647,9 +686,25 @@ void SET_LightMode(int newMode) {
 			GetLightModeStr(g_lightMode),
 			GetLightModeStr(newMode));
 		g_lightMode = newMode;
+		EventHandlers_FireEvent(CMD_EVENT_LED_MODE, newMode);
 	}
 }
-OBK_Publish_Result LED_SendCurrentLightMode() {
+void LED_SetBaseColorByIndex(int i, float f, bool bApply) {
+	if (i < 0 || i >= 5)
+		return;
+	baseColors[i] = f;
+	if (bApply) {
+		if (CFG_HasFlag(OBK_FLAG_LED_AUTOENABLE_ON_ANY_ACTION)) {
+			LED_SetEnableAll(true);
+		}
+
+		// set g_lightMode
+		SET_LightMode(Light_RGB);
+		sendColorChange();
+		apply_smart_light();
+	}
+}
+OBK_Publish_Result LED_SendCurrentLightModeParam_TempOrColor() {
 
 	if(g_lightMode == Light_Temperature) {
 		return sendTemperatureChange();
@@ -792,24 +847,32 @@ static commandResult_t enableAll(const void *context, const char *cmd, const cha
 	//}
 	//return 0;
 }
-int LED_IsRunningDriver() {
-	if(PIN_CountPinsWithRoleOrRole(IOR_PWM,IOR_PWM_n))
-		return 1;
-	if(CFG_HasFlag(OBK_FLAG_LED_FORCESHOWRGBCWCONTROLLER))
-		return 1;
-	return 0;
-}
+
 float LED_GetDimmer() {
 	return g_brightness0to100;
 }
-void LED_AddTemperature(int iVal, bool wrapAroundInsteadOfClamp) {
+int dimmer_pingPong_direction = 1;
+int temperature_pingPong_direction = 1;
+void LED_AddTemperature(int iVal, int wrapAroundInsteadOfClamp) {
 	float cur;
 
 	cur = led_temperature_current;
 
 	cur += iVal;
 
-	if (wrapAroundInsteadOfClamp == 0) {
+	if (wrapAroundInsteadOfClamp == 2) {
+		// Ping pong mode
+		cur += iVal * temperature_pingPong_direction;
+		if (cur >= led_temperature_max) {
+			cur = led_temperature_max;
+			temperature_pingPong_direction *= -1;
+		}
+		if (cur <= led_temperature_min) {
+			cur = led_temperature_min;
+			temperature_pingPong_direction *= -1;
+		}
+	}
+	else if (wrapAroundInsteadOfClamp == 0) {
 		cur += iVal;
 		// clamp
 		if (cur < led_temperature_min)
@@ -840,7 +903,6 @@ void LED_AddTemperature(int iVal, bool wrapAroundInsteadOfClamp) {
 
 	LED_SetTemperature(cur, true);
 }
-int dimmer_pingPong_direction = 1;
 void LED_AddDimmer(int iVal, int addMode, int minValue) {
 	int cur;
 
@@ -888,7 +950,21 @@ void LED_AddDimmer(int iVal, int addMode, int minValue) {
 	LED_SetDimmer(cur);
 }
 void LED_NextTemperatureHold() {
-	LED_AddTemperature(25, true);
+	LED_AddTemperature(25, 1);
+}
+void LED_NextTemperature() {
+	if (g_lightMode != Light_Temperature) {
+		LED_SetTemperature(HASS_TEMPERATURE_MIN, true);
+		return;
+	}
+	if (led_temperature_current == HASS_TEMPERATURE_MIN) {
+		LED_SetTemperature(HASS_TEMPERATURE_CENTER, true);
+	} else if (led_temperature_current == HASS_TEMPERATURE_CENTER) {
+		LED_SetTemperature(HASS_TEMPERATURE_MAX, true);
+	}
+	else {
+		LED_SetTemperature(HASS_TEMPERATURE_MIN, true);
+	}
 }
 void LED_NextDimmerHold() {
 	// dimmer hold will use some kind of min value,
@@ -1281,6 +1357,15 @@ static commandResult_t lerpSpeed(const void *context, const char *cmd, const cha
 
 	return CMD_RES_OK;
 }
+static commandResult_t ctRange(const void *context, const char *cmd, const char *args, int cmdFlags) {
+	// Use tokenizer, so we can use variables (eg. $CH11 as variable)
+	Tokenizer_TokenizeString(args, 0);
+
+	led_temperature_min = Tokenizer_GetArgFloat(0);
+	led_temperature_max = Tokenizer_GetArgFloat(1);
+
+	return CMD_RES_OK;
+}
 static commandResult_t setBrightness(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	float f;
 
@@ -1345,12 +1430,20 @@ float LED_GetHue() {
 	return g_hsv_h;
 }
 void NewLED_InitCommands(){
+	int pwmCount;
+
 	// set, but do not apply (force a refresh)
 	LED_SetTemperature(led_temperature_current,0);
+
+	PIN_get_Relay_PWM_Count(0, &pwmCount, 0);
 
 	// if this is CW, switch from default RGB to CW
 	if (isCWMode()) {
 		g_lightMode = Light_Temperature;
+	}
+	else if (pwmCount == 1 || pwmCount == 3) {
+		// if single color or RGB, force RGB
+		g_lightMode = Light_RGB;
 	}
 
 	//cmddetail:{"name":"led_dimmer","args":"[Value]",
@@ -1378,6 +1471,11 @@ void NewLED_InitCommands(){
 	//cmddetail:"fn":"basecolor_rgb","file":"cmnds/cmd_newLEDDriver.c","requires":"",
 	//cmddetail:"examples":""}
     CMD_RegisterCommand("led_basecolor_rgb", basecolor_rgb, NULL);
+	//cmddetail:{"name":"Color","args":"[HexValue]",
+	//cmddetail:"descr":"Puts the LED driver in RGB mode and sets given color.",
+	//cmddetail:"fn":"basecolor_rgb","file":"cmnds/cmd_newLEDDriver.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("Color", basecolor_rgb, NULL);
 	//cmddetail:{"name":"led_basecolor_rgbcw","args":"",
 	//cmddetail:"descr":"set PWN color using #RRGGBB[cw][ww]",
 	//cmddetail:"fn":"basecolor_rgbcw","file":"cmnds/cmd_newLEDDriver.c","requires":"",
@@ -1459,6 +1557,11 @@ void NewLED_InitCommands(){
 	//cmddetail:"fn":"rgb_gamma_control","file":"cmnds/cmd_rgbGamma.c","requires":"",
 	//cmddetail:"examples":"led_gammaCtrl on"}
     CMD_RegisterCommand("led_gammaCtrl", led_gamma_control, NULL);
+	//cmddetail:{"name":"CTRange","args":"ctRange",
+	//cmddetail:"descr":"",
+	//cmddetail:"fn":"NULL);","file":"cmnds/cmd_newLEDDriver.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("CTRange", ctRange, NULL);
 }
 
 void NewLED_RestoreSavedStateIfNeeded() {

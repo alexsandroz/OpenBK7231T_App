@@ -318,6 +318,16 @@ const char *CFG_GetMQTTUserName() {
 const char *CFG_GetMQTTPass() {
 	return g_cfg.mqtt_pass;
 }
+
+void CHANNEL_SetType(int ch, int type) {
+	if (g_cfg.pins.channelTypes[ch] != type) {
+		g_cfg.pins.channelTypes[ch] = type;
+		g_cfg_pendingChanges++;
+	}
+}
+int CHANNEL_GetType(int ch) {
+	return g_cfg.pins.channelTypes[ch];
+}
 void CFG_SetMQTTHost(const char *s) {
 	// this will return non-zero if there were any changes
 	if(strcpy_safe_checkForChanges(g_cfg.mqtt_host, s,sizeof(g_cfg.mqtt_host))) {
@@ -437,6 +447,25 @@ void CFG_SetFlag(int flag, bool bValue) {
 			CMD_StartTCPCommandLine();
 		}
 	}
+}
+void CFG_SetLoggerFlag(int flag, bool bValue) {
+	int *cfgValue;
+	cfgValue = &g_cfg.loggerFlags;
+
+	int nf = *cfgValue;
+	if (bValue) {
+		BIT_SET(nf, flag);
+	}
+	else {
+		BIT_CLEAR(nf, flag);
+	}
+	if (nf != *cfgValue) {
+		*cfgValue = nf;
+		g_cfg_pendingChanges++;
+	}
+}
+bool CFG_HasLoggerFlag(int flag) {
+	return BIT_CHECK(g_cfg.loggerFlags, flag);
 }
 int CFG_GetFlags() {
 	return g_cfg.genericFlags;
@@ -581,8 +610,11 @@ void CFG_InitAndLoad() {
 		// mark as changed
 		g_cfg_pendingChanges ++;
 	} else {
-#if PLATFORM_XR809
-		WiFI_SetMacAddress(g_cfg.mac);
+#if defined(PLATFORM_XR809) || defined(PLATFORM_BL602)
+		if (g_cfg.mac[0] == 0 && g_cfg.mac[1] == 0 && g_cfg.mac[2] == 0 && g_cfg.mac[3] == 0 && g_cfg.mac[4] == 0 && g_cfg.mac[5] == 0) {
+			WiFI_GetMacAddress((char*)g_cfg.mac);
+		}
+		WiFI_SetMacAddress((char*)g_cfg.mac);
 #endif
 		addLogAdv(LOG_WARN, LOG_FEATURE_CFG, "CFG_InitAndLoad: Correct config has been loaded with %i changes count.",g_cfg.changeCounter);
 	}

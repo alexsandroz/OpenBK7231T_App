@@ -1,30 +1,18 @@
 // NOTE: this is the same as HLW8032
-#include "../new_common.h"
-#include "../new_pins.h"
-#include "../new_cfg.h"
-// Commands register, execution API and cmd tokenizer
-#include "../cmnds/cmd_public.h"
-#include "../mqtt/new_mqtt.h"
+#include "drv_cse7766.h"
+
 #include "../logging/logging.h"
-#include "drv_local.h"
-#include "drv_public.h"
+#include "../new_pins.h"
+#include "drv_bl_shared.h"
+#include "drv_pwrCal.h"
 #include "drv_uart.h"
-#include "../httpserver/new_http.h"
 
-static float CSE7766_PREF = 3150.261719;
-static float CSE7766_UREF = 6.300000;
-static float CSE7766_IREF = 251210;
-
-static int raw_unscaled_voltage;
-static int raw_unscaled_current;
-static int raw_unscaled_power;
-//static int raw_unscaled_freq;
-
+#define DEFAULT_VOLTAGE_CAL 1.94034719
+#define DEFAULT_CURRENT_CAL 251210
+#define DEFAULT_POWER_CAL 1.88214409
 
 #define CSE7766_BAUD_RATE 4800
 
-
-// startDriver CSE7766
 int CSE7766_TryToGetNextCSE7766Packet() {
 	int cs;
 	int i;
@@ -128,15 +116,35 @@ int CSE7766_TryToGetNextCSE7766Packet() {
 		55 5A 02 D5 00 00 05 A6 00 3C 05 00 FD AB 4D B2 A0 02 96 5F 71 48 4B 05 
 		*/
 		//
-			
+		// 70W 240V sample from Elektroda user
+		/*
+		H  Id VCal---- Voltage- ICal---- Current- PCal---- Power--- Ad CF--- Ck
+		55 5A 02 FC D8 00 06 28 00 41 32 00 C9 FE 53 7B 18 02 3B D4 71 71 E3 FA
+		55 5A 02 FC D8 00 06 28 00 41 32 00 C9 FE 53 7B 18 02 3B D4 71 71 E3 FA
+		55 5A 02 FC D8 00 06 28 00 41 32 00 C9 FE 53 7B 18 02 3C 28 71 71 EA 56
+		55 5A 02 FC D8 00 06 28 00 41 32 00 D7 F2 53 7B 18 02 3B 71 71 71 F1 A7
+		55 5A 02 FC D8 00 06 2F 00 41 32 00 D7 F2 53 7B 18 02 3D AF 71 71 F8 F5
+		55 5A 02 FC D8 00 06 2F 00 41 32 00 D7 F2 53 7B 18 02 3E 9F 71 71 FE EC
+
+		backlog startDriver CSE7766; uartFakeHex 555A02FCD800062F00413200D7F2537B18023E9F7171FEEC
+		*/
 		
 		
 
 		adjustement = UART_GetNextByte(20);
-		raw_unscaled_voltage = UART_GetNextByte(5) << 16 | UART_GetNextByte(6) << 8 | UART_GetNextByte(7);
-		raw_unscaled_current = UART_GetNextByte(11) << 16 | UART_GetNextByte(12) << 8 | UART_GetNextByte(13);
-		raw_unscaled_power = UART_GetNextByte(17) << 16 | UART_GetNextByte(18) << 8 | UART_GetNextByte(19);
-		cf_pulses = UART_GetNextByte(21) << 8 | UART_GetNextByte(22);
+		int vol_par = UART_GetNextByte(2) << 16 | UART_GetNextByte(3) << 8 | UART_GetNextByte(4);
+		int cur_par = UART_GetNextByte(8) << 16 | UART_GetNextByte(9) << 8 | UART_GetNextByte(10);
+		int pow_par = UART_GetNextByte(14) << 16 | UART_GetNextByte(15) << 8 | UART_GetNextByte(16);
+        float raw_unscaled_voltage = UART_GetNextByte(5) << 16 |
+                                     UART_GetNextByte(6) << 8 |
+                                     UART_GetNextByte(7);
+        float raw_unscaled_current = UART_GetNextByte(11) << 16 |
+                                     UART_GetNextByte(12) << 8 |
+                                     UART_GetNextByte(13);
+        float raw_unscaled_power = UART_GetNextByte(17) << 16 |
+                                   UART_GetNextByte(18) << 8 |
+                                   UART_GetNextByte(19);
+        cf_pulses = UART_GetNextByte(21) << 8 | UART_GetNextByte(22);
 
 		// i am not sure about these flags
 		if (adjustement & 0x40) {  // Voltage valid
@@ -159,31 +167,22 @@ int CSE7766_TryToGetNextCSE7766Packet() {
 			raw_unscaled_current = 0;
 		}
 
-		// those are final values, like 230V
-		{
-			float power, voltage, current;
-			if (raw_unscaled_power == 0) {
-				power = 0;
-			} else {
-				power = CSE7766_PREF / raw_unscaled_power;
-			}
-			if (raw_unscaled_voltage == 0) {
-				voltage = 0;
-			} else {
-				voltage = CSE7766_UREF / raw_unscaled_voltage;
-			}
-			if (raw_unscaled_current == 0) {
-				current = 0;
-			} else {
-				current = CSE7766_IREF / raw_unscaled_current;
-			}
-
-			BL_ProcessUpdate(voltage,current,power);
+		if (raw_unscaled_voltage) {
+			raw_unscaled_voltage = vol_par / raw_unscaled_voltage;
 		}
-	}
+		if (raw_unscaled_current) {
+			raw_unscaled_current = cur_par / raw_unscaled_current;
+		}
+		if (raw_unscaled_power) {
+			raw_unscaled_power = pow_par / raw_unscaled_power;
+		}
 
-
-
+        // those are final values, like 230V
+        float voltage, current, power;
+        PwrCal_Scale(raw_unscaled_voltage, raw_unscaled_current,
+                     raw_unscaled_power, &voltage, &current, &power);
+        BL_ProcessUpdate(voltage, current, power, 0.0f);
+    }
 
 #if 0
 	{
@@ -199,129 +198,18 @@ int CSE7766_TryToGetNextCSE7766Packet() {
 	return CSE7766_PACKET_LEN;
 }
 
-commandResult_t CSE7766_PowerSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
-	float realPower;
-
-	if(args==0||*args==0) {
-		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
-	}
-	realPower = atof(args);
-	CSE7766_PREF = realPower * raw_unscaled_power;
-
-	// UPDATE: now they are automatically saved
-	CFG_SetPowerMeasurementCalibrationFloat(CFG_OBK_POWER,CSE7766_PREF);
-
-	{
-		char dbg[128];
-		snprintf(dbg, sizeof(dbg),"PowerSet: you gave %f, set ref to %f\n", realPower, CSE7766_PREF);
-		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,dbg);
-	}
-	return CMD_RES_OK;
-}
-commandResult_t CSE7766_PowerRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
-
-	if(args==0||*args==0) {
-		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
-	}
-	CSE7766_PREF = atof(args);
-
-	// UPDATE: now they are automatically saved
-	CFG_SetPowerMeasurementCalibrationFloat(CFG_OBK_POWER,CSE7766_PREF);
-
-	return 0;
-}
-commandResult_t CSE7766_CurrentRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
-
-	if(args==0||*args==0) {
-		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
-	}
-	CSE7766_IREF = atof(args);
-
-	// UPDATE: now they are automatically saved
-	CFG_SetPowerMeasurementCalibrationFloat(CFG_OBK_CURRENT,CSE7766_IREF);
-
-	return CMD_RES_OK;
-}
-commandResult_t CSE7766_VoltageRef(const void *context, const char *cmd, const char *args, int cmdFlags) {
-
-	if(args==0||*args==0) {
-		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
-	}
-	CSE7766_UREF = atof(args);
-
-	// UPDATE: now they are automatically saved
-	CFG_SetPowerMeasurementCalibrationFloat(CFG_OBK_VOLTAGE,CSE7766_UREF);
-
-	return CMD_RES_OK;
-}
-commandResult_t CSE7766_VoltageSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
-	float realV;
-
-	if(args==0||*args==0) {
-		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
-	}
-	realV = atof(args);
-	CSE7766_UREF = realV * raw_unscaled_voltage;
-
-	// UPDATE: now they are automatically saved
-	CFG_SetPowerMeasurementCalibrationFloat(CFG_OBK_VOLTAGE,CSE7766_UREF);
-
-	{
-		char dbg[128];
-		snprintf(dbg, sizeof(dbg),"VoltageSet: you gave %f, set ref to %f\n", realV, CSE7766_UREF);
-		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,dbg);
-	}
-
-	return CMD_RES_OK;
-}
-commandResult_t CSE7766_CurrentSet(const void *context, const char *cmd, const char *args, int cmdFlags) {
-	float realI;
-
-	if(args==0||*args==0) {
-		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"This command needs one argument");
-		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
-	}
-	realI = atof(args);
-	CSE7766_IREF = realI * raw_unscaled_current;
-	
-	// UPDATE: now they are automatically saved
-	CFG_SetPowerMeasurementCalibrationFloat(CFG_OBK_CURRENT,CSE7766_IREF);
-
-	{
-		char dbg[128];
-		snprintf(dbg, sizeof(dbg),"CurrentSet: you gave %f, set ref to %f\n", realI, CSE7766_IREF);
-		addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,dbg);
-	}
-	return CMD_RES_OK;
-}
-void CSE7766_Init() 
-{
+void CSE7766_Init(void) {
     BL_Shared_Init();
 
-	// UPDATE: now they are automatically saved
-	CSE7766_UREF = CFG_GetPowerMeasurementCalibrationFloat(CFG_OBK_VOLTAGE,CSE7766_UREF);
-	CSE7766_PREF = CFG_GetPowerMeasurementCalibrationFloat(CFG_OBK_POWER,CSE7766_PREF);
-	CSE7766_IREF = CFG_GetPowerMeasurementCalibrationFloat(CFG_OBK_CURRENT,CSE7766_IREF);
+    PwrCal_Init(PWR_CAL_MULTIPLY, DEFAULT_VOLTAGE_CAL, DEFAULT_CURRENT_CAL,
+                DEFAULT_POWER_CAL);
 
 	UART_InitUART(CSE7766_BAUD_RATE);
 	UART_InitReceiveRingBuffer(512);
-	CMD_RegisterCommand("PowerSet",CSE7766_PowerSet, NULL);
-	CMD_RegisterCommand("VoltageSet",CSE7766_VoltageSet, NULL);
-	CMD_RegisterCommand("CurrentSet",CSE7766_CurrentSet, NULL);
-	CMD_RegisterCommand("PREF",CSE7766_PowerRef, NULL);
-	CMD_RegisterCommand("VREF",CSE7766_VoltageRef, NULL);
-	CMD_RegisterCommand("IREF",CSE7766_CurrentRef, NULL);
 }
 
-void CSE7766_RunFrame() {
-
-	//addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"UART buffer size %i\n", UART_GetDataSize());
+void CSE7766_RunFrame(void) {
+    //addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER,"UART buffer size %i\n", UART_GetDataSize());
 
 	CSE7766_TryToGetNextCSE7766Packet();
 }
-

@@ -11,8 +11,9 @@
 // If given bit is set, then given channel is hidden
 int g_hiddenChannels = 0;
 static char *g_channelLabels[CHANNEL_MAX] = { 0 };
+static int g_bHideTogglePrefix = 0;
 
-void CHANNEL_SetLabel(int ch, const char *s) {
+void CHANNEL_SetLabel(int ch, const char *s, int bHideTogglePrefix) {
 	if (ch < 0)
 		return;
 	if (ch >= CHANNEL_MAX)
@@ -20,6 +21,18 @@ void CHANNEL_SetLabel(int ch, const char *s) {
 	if (g_channelLabels[ch])
 		free(g_channelLabels[ch]);
 	g_channelLabels[ch] = strdup(s);
+	if (ch >= 0 && ch <= 32) {
+		BIT_SET_TO(g_bHideTogglePrefix, ch, bHideTogglePrefix);
+	}
+}
+bool CHANNEL_ShouldAddTogglePrefixToUI(int ch) {
+	if (ch < 0)
+		return true;
+	if (ch >= 32)
+		return true;
+	if (BIT_CHECK(g_bHideTogglePrefix, ch))
+		return false;
+	return true;
 }
 const char *CHANNEL_GetLabel(int ch) {
 	if (ch >= 0 && ch < CHANNEL_MAX) {
@@ -34,8 +47,9 @@ const char *CHANNEL_GetLabel(int ch) {
 static commandResult_t CMD_SetChannelLabel(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	int ch;
 	const char *s;
+	int bHideTogglePrefix = 0;
 
-	Tokenizer_TokenizeString(args, 0);
+	Tokenizer_TokenizeString(args, TOKENIZER_ALLOW_QUOTES);
 	// following check must be done after 'Tokenizer_TokenizeString',
 	// so we know arguments count in Tokenizer. 'cmd' argument is
 	// only for warning display
@@ -44,9 +58,42 @@ static commandResult_t CMD_SetChannelLabel(const void *context, const char *cmd,
 	}
 
 	ch = Tokenizer_GetArgInteger(0);
-	s = Tokenizer_GetArgFrom(1);
+	s = Tokenizer_GetArg(1);
+	if (Tokenizer_GetArgsCount() > 2) {
+		bHideTogglePrefix = Tokenizer_GetArg(2);
+	}
 
-	CHANNEL_SetLabel(ch, s);
+	CHANNEL_SetLabel(ch, s, bHideTogglePrefix);
+
+	return CMD_RES_OK;
+}
+static commandResult_t CMD_Ch(const void *context, const char *cmd, const char *args, int cmdFlags) {
+	int ch, val;
+	const char *p;
+	char type;
+
+	Tokenizer_TokenizeString(args, 0);
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 1)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+
+	p = cmd + 2;
+	type = *p;
+	if (p == '+') {
+		p++;
+	}
+	ch = atoi(p);
+	val = Tokenizer_GetArgInteger(0);
+
+	if (type == '+') {
+		CHANNEL_Add(ch, val);
+	}
+	else {
+		CHANNEL_Set(ch, val, false);
+	}
 
 	return CMD_RES_OK;
 }
@@ -65,6 +112,25 @@ static commandResult_t CMD_SetChannel(const void *context, const char *cmd, cons
 	val = Tokenizer_GetArgInteger(1);
 
 	CHANNEL_Set(ch,val, false);
+
+	return CMD_RES_OK;
+}
+static commandResult_t CMD_SetChannelFloat(const void* context, const char* cmd, const char* args, int cmdFlags) {
+	int ch;
+	float val;
+
+	Tokenizer_TokenizeString(args, 0);
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 2)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+
+	ch = Tokenizer_GetArgInteger(0);
+	val = Tokenizer_GetArgFloat(1);
+
+	CHANNEL_Set_FloatPWM(ch, val, false);
 
 	return CMD_RES_OK;
 }
@@ -203,6 +269,33 @@ static commandResult_t CMD_GetChannel(const void *context, const char *cmd, cons
 	} else {
 		ADDLOG_INFO(LOG_FEATURE_CMD, "Channel %i is %i",ch, val);
 	}
+
+	return CMD_RES_OK;
+}
+static commandResult_t CMD_Map(const void *context, const char *cmd, const char *args, int cmdFlags) {
+	int targetChannel;
+
+	float input, in_min, in_max, out_min, out_max, result;
+
+	Tokenizer_TokenizeString(args, 0);
+	// following check must be done after 'Tokenizer_TokenizeString',
+	// so we know arguments count in Tokenizer. 'cmd' argument is
+	// only for warning display
+	if (Tokenizer_CheckArgsCountAndPrintWarning(cmd, 6)) {
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+	// [TargetChannel][InputValue][InMin][InMax][OutMin][OutMax]
+	targetChannel = Tokenizer_GetArgInteger(0);
+	input = Tokenizer_GetArgFloat(1);
+	in_min = Tokenizer_GetArgFloat(2);
+	in_max = Tokenizer_GetArgFloat(3);
+	out_min = Tokenizer_GetArgFloat(4);
+	out_max = Tokenizer_GetArgFloat(5);
+
+	// #define MAP(x, in_min, in_max, out_min, out_max)
+	result = MAP(input, in_min, in_max, out_min, out_max);
+
+	CHANNEL_Set(targetChannel, result, 0);
 
 	return CMD_RES_OK;
 }
@@ -357,7 +450,6 @@ static commandResult_t CMD_SetFlag(const void *context, const char *cmd, const c
 
 	return CMD_RES_OK;
 }
-extern int g_bWantPinDeepSleep;
 static commandResult_t CMD_PinDeepSleep(const void *context, const char *cmd, const char *args, int cmdFlags){
 	g_bWantPinDeepSleep = 1;
 	return CMD_RES_OK;
@@ -368,6 +460,11 @@ void CMD_InitChannelCommands(){
 	//cmddetail:"fn":"CMD_SetChannel","file":"cmnds/cmd_channels.c","requires":"",
 	//cmddetail:"examples":""}
     CMD_RegisterCommand("SetChannel", CMD_SetChannel, NULL);
+	//cmddetail:{"name":"SetChannelFloat","args":"[ChannelIndex][ChannelValue]",
+	//cmddetail:"descr":"Sets a raw channel to given float value. Currently only used for LED PWM channels.",
+	//cmddetail:"fn":"CMD_SetChannelFloat","file":"cmnds/cmd_channels.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("SetChannelFloat", CMD_SetChannelFloat, NULL);
 	//cmddetail:{"name":"ToggleChannel","args":"[ChannelIndex]",
 	//cmddetail:"descr":"Toggles given channel value. Non-zero becomes zero, zero becomes 1.",
 	//cmddetail:"fn":"CMD_ToggleChannel","file":"cmnds/cmd_channels.c","requires":"",
@@ -388,7 +485,7 @@ void CMD_InitChannelCommands(){
 	//cmddetail:"fn":"CMD_SetPinRole","file":"cmnds/cmd_channels.c","requires":"",
 	//cmddetail:"examples":""}
     CMD_RegisterCommand("SetPinRole", CMD_SetPinRole, NULL);
-	//cmddetail:{"name":"SetPinChannel","args":"[PinRole][ChannelIndex]",
+	//cmddetail:{"name":"SetPinChannel","args":"[PinIndex][ChannelIndex]",
 	//cmddetail:"descr":"This allows you to set a channel linked to pin from console. Usually it's easier to do this through WWW panel, so you don't have to use this command.",
 	//cmddetail:"fn":"CMD_SetPinChannel","file":"cmnds/cmd_channels.c","requires":"",
 	//cmddetail:"examples":""}
@@ -428,8 +525,8 @@ void CMD_InitChannelCommands(){
 	//cmddetail:"fn":"CMD_FullBootTime","file":"cmnds/cmd_channels.c","requires":"",
 	//cmddetail:"examples":""}
 	CMD_RegisterCommand("FullBootTime", CMD_FullBootTime, NULL);
-	//cmddetail:{"name":"SetChannelLabel","args":"[ChannelIndex][Str]",
-	//cmddetail:"descr":"Sets a channel label for UI.",
+	//cmddetail:{"name":"SetChannelLabel","args":"[ChannelIndex][Str][bHideTogglePrefix]",
+	//cmddetail:"descr":"Sets a channel label for UI. If you use 1 for bHideTogglePrefix, then the 'Toggle ' prefix from button will be omitted",
 	//cmddetail:"fn":"CMD_SetChannelLabel","file":"cmnds/cmd_channels.c","requires":"",
 	//cmddetail:"examples":""}
 	CMD_RegisterCommand("SetChannelLabel", CMD_SetChannelLabel, NULL);
@@ -438,10 +535,20 @@ void CMD_InitChannelCommands(){
 	//cmddetail:"fn":"CMD_MapRanges","file":"cmnds/cmd_channels.c","requires":"",
 	//cmddetail:"examples":""}
 	CMD_RegisterCommand("MapRanges", CMD_MapRanges, NULL);
-	//cmddetail:{"name":"SetChannelVisible","args":"",
-	//cmddetail:"descr":"NULL",
+	//cmddetail:{"name":"Map","args":"[TargetChannel][InputValue][InMin][InMax][OutMin][OutMax]",
+	//cmddetail:"descr":"qqq",
+	//cmddetail:"fn":"CMD_Map","file":"cmnds/cmd_channels.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("Map", CMD_Map, NULL);
+	//cmddetail:{"name":"SetChannelVisible","args":"[ChannelIndex][bVisible]",
+	//cmddetail:"descr":"This allows you to force-hide a certain channel from HTTP gui. The channel will still work, but will not show up as a button, or a toggle, etc...",
 	//cmddetail:"fn":"CMD_SetChannelVisible","file":"cmnds/cmd_channels.c","requires":"",
 	//cmddetail:"examples":""}
 	CMD_RegisterCommand("SetChannelVisible", CMD_SetChannelVisible, NULL);
+	//cmddetail:{"name":"Ch","args":"[InputValue]",
+	//cmddetail:"descr":"An alternate command to access channels. It returns all used channels in JSON format. The syntax is ChINDEX value, there is no space between Ch and channel index. It can be sent without value to poll channel values.",
+	//cmddetail:"fn":"CMD_Ch","file":"cmnds/cmd_channels.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("Ch", CMD_Ch, NULL);
 
 }

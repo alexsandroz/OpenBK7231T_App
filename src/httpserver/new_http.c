@@ -408,7 +408,7 @@ const char* htmlPinRoleNames[] = {
 	"SM2135CLK",
 	"BP5758D_DAT",
 	"BP5758D_CLK",
-    "BP1658CJ_DAT",
+	"BP1658CJ_DAT",
 	"BP1658CJ_CLK",
 	"PWM_n",
 	"IRRecv",
@@ -437,16 +437,30 @@ const char* htmlPinRoleNames[] = {
 	"SoftSCL",
 	"SM2235DAT",
 	"SM2235CLK",
-    "BridgeFWD",
-    "BridgeREV",
-    "error",
+	"BridgeFWD",
+	"BridgeREV",
+	"Btn_SmartLED",
+	"Btn_SmartLED_n",
+	"DoorSnsrWSleep",
+	"DoorSnsrWSleep_nPup",
+	"BAT_ADC",
+	"BAT_Relay",
+	"TM1637_DIO",
+	"TM1637_CLK",
+	"BL0937SEL_n",
+  "DoorSnsrWSleep_pd",
+	"SGP_CLK",
+	"SGP_DAT",
+	"ADC_Button",
+	"error",
+	"error",
 	"error",
 	"error",
 	"error",
 	"error",
 };
 
-const char *PIN_RoleToString(int role) {
+const char* PIN_RoleToString(int role) {
 	return htmlPinRoleNames[role];
 }
 int PIN_ParsePinRoleName(const char* name) {
@@ -695,6 +709,7 @@ int HTTP_ProcessPacket(http_request_t* request) {
 	if (http_checkUrlBase(urlStr, "about")) return http_fn_about(request);
 
 	if (http_checkUrlBase(urlStr, "cfg_mqtt")) return http_fn_cfg_mqtt(request);
+	if (http_checkUrlBase(urlStr, "cfg_ip")) return http_fn_cfg_ip(request);
 	if (http_checkUrlBase(urlStr, "cfg_mqtt_set")) return http_fn_cfg_mqtt_set(request);
 
 	if (http_checkUrlBase(urlStr, "cfg_webapp")) return http_fn_cfg_webapp(request);
@@ -715,7 +730,6 @@ int HTTP_ProcessPacket(http_request_t* request) {
 	if (http_checkUrlBase(urlStr, "cfg_startup")) return http_fn_cfg_startup(request);
 	if (http_checkUrlBase(urlStr, "cfg_dgr")) return http_fn_cfg_dgr(request);
 
-	if (http_checkUrlBase(urlStr, "cfg_quick")) return http_fn_cfg_quick(request);
 	if (http_checkUrlBase(urlStr, "ha_cfg")) return http_fn_ha_cfg(request);
 	if (http_checkUrlBase(urlStr, "ha_discovery")) return http_fn_ha_discovery(request);
 	if (http_checkUrlBase(urlStr, "cfg")) return http_fn_cfg(request);

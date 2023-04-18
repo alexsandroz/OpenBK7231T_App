@@ -13,7 +13,7 @@ typedef enum commandResult_e {
 
 } commandResult_t;
 
-typedef commandResult_t (*commandHandler_t)(const void* context, const char* cmd, const char* args, int flags);
+typedef commandResult_t(*commandHandler_t)(const void* context, const char* cmd, const char* args, int flags);
 
 // command was entered in console (web app etc)
 #define COMMAND_FLAG_SOURCE_CONSOLE		1
@@ -37,12 +37,13 @@ void CMD_Init_Early();
 void CMD_Init_Delayed();
 void CMD_FreeAllCommands();
 void CMD_RunUartCmndIfRequired();
-void CMD_RegisterCommand(const char* name, commandHandler_t handler,  void* context);
+void CMD_RegisterCommand(const char* name, commandHandler_t handler, void* context);
 commandResult_t CMD_ExecuteCommand(const char* s, int cmdFlags);
 commandResult_t CMD_ExecuteCommandArgs(const char* cmd, const char* args, int cmdFlags);
 // like a strdup, but will expand constants.
 // Please remember to free the returned string
-char *CMD_ExpandingStrdup(const char *in);
+char* CMD_ExpandingStrdup(const char* in);
+commandResult_t CMD_CreateAliasHelper(const char *alias, const char *ocmd);
 
 enum EventCode {
 	CMD_EVENT_NONE,
@@ -105,15 +106,25 @@ enum EventCode {
 
 	CMD_EVENT_PIN_ON3CLICK,
 	CMD_EVENT_PIN_ON4CLICK,
+	CMD_EVENT_PIN_ON5CLICK,
 
 	CMD_EVENT_CHANGE_NOPINGTIME,
 
 	CMD_EVENT_TUYAMCU_PARSED, // Argument: TuyaMCU packet type
 
+	CMD_EVENT_LED_MODE, // Argument: new light mode as integer
+
+	CMD_EVENT_CHANGE_NOMQTTTIME,
+
+	CMD_EVENT_ADC_BUTTON,
+
+	CMD_EVENT_NTP_STATE,
+
 	// must be lower than 256
 	CMD_EVENT_MAX_TYPES
 };
 
+int EVENT_ParseEventName(const char *s);
 
 // the slider control in the UI emits values
 //in the range from 154-500 (defined
@@ -121,8 +132,8 @@ enum EventCode {
 
 #define HASS_TEMPERATURE_MIN 154
 #define HASS_TEMPERATURE_MAX 500
-#define KELVIN_TEMPERATURE_MIN 2000
-#define KELVIN_TEMPERATURE_MAX 6500
+#define HASS_TEMPERATURE_CENTER ((HASS_TEMPERATURE_MAX+HASS_TEMPERATURE_MIN)/2)
+#define HASS_TO_KELVIN(x) (1000000 / (x))
 
 // In general, LED can be in two modes:
 // - Temperature (Cool and Warm LEDs are on)
@@ -139,20 +150,23 @@ enum LightMode {
 #define TOKENIZER_DONT_EXPAND					2
 // expand constants within whole command and not per-argumenet
 #define TOKENIZER_ALTERNATE_EXPAND_AT_START		4
+// force single argument mode
+#define TOKENIZER_FORCE_SINGLE_ARGUMENT_MODE	8
 
 // cmd_tokenizer.c
 int Tokenizer_GetArgsCount();
-bool Tokenizer_CheckArgsCountAndPrintWarning(const char *cmdStr, int reqCount);
+bool Tokenizer_CheckArgsCountAndPrintWarning(const char* cmdStr, int reqCount);
 const char* Tokenizer_GetArg(int i);
 const char* Tokenizer_GetArgFrom(int i);
 int Tokenizer_GetArgInteger(int i);
+int Tokenizer_GetArgIntegerDefault(int i, int def);
 bool Tokenizer_IsArgInteger(int i);
 float Tokenizer_GetArgFloat(int i);
 int Tokenizer_GetArgIntegerRange(int i, int rangeMax, int rangeMin);
 void Tokenizer_TokenizeString(const char* s, int flags);
 // cmd_repeatingEvents.c
 void RepeatingEvents_Init();
-void RepeatingEvents_OnEverySecond();
+void RepeatingEvents_RunUpdate(float deltaTimeSeconds);
 void SIM_GenerateRepeatingEventsDesc(char *o, int outLen);
 // cmd_eventHandlers.c
 void EventHandlers_Init();
@@ -175,10 +189,10 @@ void NewLED_InitCommands();
 void NewLED_RestoreSavedStateIfNeeded();
 float LED_GetDimmer();
 void LED_AddDimmer(int iVal, int addMode, int minValue);
-void LED_AddTemperature(int iVal, bool wrapAroundInsteadOfClamp);
+void LED_AddTemperature(int iVal, int wrapAroundInsteadOfClamp);
 void LED_NextDimmerHold();
 void LED_NextTemperatureHold();
-int LED_IsRunningDriver();
+void LED_NextTemperature();
 float LED_GetTemperature();
 void LED_SetTemperature(int tmpInteger, bool bApply);
 float LED_GetTemperature0to1Range();
@@ -194,12 +208,14 @@ void LED_GetFinalRGBCW(byte* rgbcw);
 // color indices are as in Tasmota
 void LED_SetColorByIndex(int index);
 void LED_NextColor();
+void LED_NextColorTemperature();
 void LED_ToggleEnabled();
 bool LED_IsLedDriverChipRunning();
 bool LED_IsLEDRunning();
 void LED_SetEnableAll(int bEnable);
 int LED_GetEnableAll();
 void LED_GetBaseColorString(char* s);
+void LED_SetBaseColorByIndex(int i, float f, bool bApply);
 int LED_GetMode();
 float LED_GetHue();
 float LED_GetSaturation();
@@ -212,8 +228,10 @@ OBK_Publish_Result sendColorChange();
 OBK_Publish_Result LED_SendEnableAllState();
 OBK_Publish_Result LED_SendDimmerChange();
 OBK_Publish_Result sendTemperatureChange();
-OBK_Publish_Result LED_SendCurrentLightMode();
+OBK_Publish_Result LED_SendCurrentLightModeParam_TempOrColor();
 void LED_ResetGlobalVariablesToDefaults();
+extern float led_temperature_min;
+extern float led_temperature_max;
 // cmd_test.c
 int CMD_InitTestCommands();
 // cmd_channels.c
@@ -225,13 +243,15 @@ void CMD_StartTCPCommandLine();
 // cmd_script.c
 int CMD_GetCountActiveScriptThreads();
 
+const char* CMD_GetResultString(commandResult_t r);
+
 void SVM_RunThreads(int deltaMS);
 void CMD_InitScripting();
 byte* LFS_ReadFile(const char* fname);
 
-commandResult_t CMD_ClearAllHandlers(const void *context, const char *cmd, const char *args, int cmdFlags);
-commandResult_t RepeatingEvents_Cmd_ClearRepeatingEvents(const void *context, const char *cmd, const char *args, int cmdFlags);
-commandResult_t CMD_resetSVM(const void *context, const char *cmd, const char *args, int cmdFlags);
+commandResult_t CMD_ClearAllHandlers(const void* context, const char* cmd, const char* args, int cmdFlags);
+commandResult_t RepeatingEvents_Cmd_ClearRepeatingEvents(const void* context, const char* cmd, const char* args, int cmdFlags);
+commandResult_t CMD_resetSVM(const void* context, const char* cmd, const char* args, int cmdFlags);
 int RepeatingEvents_GetActiveCount();
 
 #endif // __CMD_PUBLIC_H__

@@ -117,6 +117,8 @@ int MQTT_GetPublishEventCounter(void);
 int MQTT_GetPublishErrorCounter(void);
 int MQTT_GetReceivedEventCounter(void);
 
+OBK_Publish_Result PublishQueuedItems();
+OBK_Publish_Result MQTT_ChannelPublish(int channel, int flags);
 void MQTT_ClearCallbacks();
 int MQTT_RegisterCallback(const char* basetopic, const char* subscriptiontopic, int ID, mqtt_callback_fn callback);
 int MQTT_RemoveCallback(int ID);
@@ -136,7 +138,6 @@ OBK_Publish_Result MQTT_DoItemPublish(int idx);
 OBK_Publish_Result MQTT_PublishMain_StringFloat(const char* sChannel, float f);
 OBK_Publish_Result MQTT_PublishMain_StringInt(const char* sChannel, int val);
 OBK_Publish_Result MQTT_PublishMain_StringString(const char* sChannel, const char* valueStr, int flags);
-OBK_Publish_Result MQTT_ChannelChangeCallback(int channel, int iVal);
 void MQTT_PublishOnlyDeviceChannelsIfPossible();
 void MQTT_QueuePublish(const char* topic, const char* channel, const char* value, int flags);
 void MQTT_QueuePublishWithCommand(const char* topic, const char* channel, const char* value, int flags, PostPublishCommands command);
@@ -147,6 +148,7 @@ void MQTT_InvokeCommandAtEnd(PostPublishCommands command);
 bool MQTT_IsReady();
 extern int g_mqtt_bBaseTopicDirty;
 extern int mqtt_reconnect;
+extern int mqtt_loopsWithDisconnected;
 
 // TODO: hide it, internal usage only
 #define MQTT_STACK_BUFFER_SIZE 32

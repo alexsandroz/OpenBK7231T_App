@@ -3,6 +3,7 @@
 #include "../new_cfg.h"
 // Commands register, execution API and cmd tokenizer
 #include "../cmnds/cmd_public.h"
+#include "../cmnds/cmd_local.h"
 #include "../logging/logging.h"
 
 
@@ -213,13 +214,34 @@ void UART_SendByte(byte b) {
 }
 
 commandResult_t CMD_UART_Send_Hex(const void *context, const char *cmd, const char *args, int cmdFlags) {
+	byte b;
+	float val;
+	const char *stop;
+
 	//const char *args = CMD_GetArg(1);
 	if (!(*args)) {
 		addLogAdv(LOG_INFO, LOG_FEATURE_TUYAMCU, "CMD_UART_Send_Hex: requires 1 argument (hex string, like FFAABB00CCDD\n");
 		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
 	}
 	while (*args) {
-		byte b;
+		if (*args == ' ') {
+			args++;
+			continue;
+		}
+		if (*args == '$') {
+			stop = args + 1;
+			while (*stop && *stop != '$') {
+				stop++;
+			}
+			CMD_ExpandConstant(args, stop, &val);
+			b = (int)val;
+			UART_SendByte(b);
+
+			if (*stop == 0)
+				break;
+			args = stop + 1;
+			continue;
+		}
 		b = hexbyte(args);
 
 		UART_SendByte(b);
@@ -230,6 +252,50 @@ commandResult_t CMD_UART_Send_Hex(const void *context, const char *cmd, const ch
 }
 
 
+// This is a tool for debugging.
+// It simulates OpenBeken receiving packet from UART.
+// For example, you can do: 
+/*
+1. You can simulate TuyaMCU battery powered device packet:
+
+uartFakeHex 55 AA 00 05 00 05 01 04 00 01 01 10 55
+55 AA	00	05		00 05	0104000101	10
+HEADER	VER=00	Unk		LEN	fnId=1 Enum V=1	CHK
+
+backlog startDriver TuyaMCU; uartFakeHex 55 AA 00 05 00 05 01 04 00 01 01 10 55
+
+*/
+commandResult_t CMD_UART_FakeHex(const void *context, const char *cmd, const char *args, int cmdFlags) {
+	//const char *args = CMD_GetArg(1);
+	//byte rawData[128];
+	//int curCnt;
+
+	//curCnt = 0;
+	if (!(*args)) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_TUYAMCU, "CMD_UART_FakeHex: requires 1 argument (hex string, like FFAABB00CCDD\n");
+		return CMD_RES_NOT_ENOUGH_ARGUMENTS;
+	}
+	while (*args) {
+		byte b;
+		if (*args == ' ') {
+			args++;
+			continue;
+		}
+		b = hexbyte(args);
+
+		//rawData[curCnt] = b;
+		//curCnt++;
+		//if(curCnt>=sizeof(rawData)) {
+		//  addLogAdv(LOG_INFO, LOG_FEATURE_TUYAMCU,"CMD_UART_FakeHex: sorry, given string is too long\n");
+		//  return -1;
+		//}
+
+		UART_AppendByteToCircularBuffer(b);
+
+		args += 2;
+	}
+	return 1;
+}
 // uartSendASCII test123
 commandResult_t CMD_UART_Send_ASCII(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	//const char *args = CMD_GetArg(1);
@@ -246,6 +312,10 @@ commandResult_t CMD_UART_Send_ASCII(const void *context, const char *cmd, const 
 	return CMD_RES_OK;
 }
 bool b_uart_commands_added = false;
+void UART_ResetForSimulator() {
+	b_uart_commands_added = false;
+	g_uart_init_counter = 0;
+}
 void UART_AddCommands() {
 	//cmddetail:{"name":"uartSendHex","args":"[HexString]",
 	//cmddetail:"descr":"Sends raw data by UART, can be used to send TuyaMCU data, but you must write whole packet with checksum yourself",
@@ -257,6 +327,11 @@ void UART_AddCommands() {
 	//cmddetail:"fn":"CMD_UART_Send_ASCII","file":"driver/drv_uart.c","requires":"",
 	//cmddetail:"examples":""}
 	CMD_RegisterCommand("uartSendASCII", CMD_UART_Send_ASCII, NULL);
+	//cmddetail:{"name":"uartFakeHex","args":"[HexString]",
+	//cmddetail:"descr":"Spoofs a fake hex packet so it looks like TuyaMCU send that to us. Used for testing.",
+	//cmddetail:"fn":"CMD_UART_FakeHex","file":"driver/drv_uart.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("uartFakeHex", CMD_UART_FakeHex, NULL);
 }
 int UART_InitUART(int baud) {
 	g_uart_init_counter++;

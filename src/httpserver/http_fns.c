@@ -22,7 +22,7 @@
 static char SUBMIT_AND_END_FORM[] = "<br><input type=\"submit\" value=\"Submit\"></form>";
 
 #ifdef WINDOWS
-	// nothing
+// nothing
 #elif PLATFORM_BL602
 
 #elif PLATFORM_W600 || PLATFORM_W800
@@ -30,12 +30,12 @@ static char SUBMIT_AND_END_FORM[] = "<br><input type=\"submit\" value=\"Submit\"
 #elif PLATFORM_XR809
 #include <image/flash.h>
 #elif defined(PLATFORM_BK7231N)
-	// tuya-iotos-embeded-sdk-wifi-ble-bk7231n/sdk/include/tuya_hal_storage.h
+// tuya-iotos-embeded-sdk-wifi-ble-bk7231n/sdk/include/tuya_hal_storage.h
 #include "tuya_hal_storage.h"
 #include "BkDriverFlash.h"
 #else
-	// REALLY? A typo in Tuya SDK? Storge?
-	// tuya-iotos-embeded-sdk-wifi-ble-bk7231t/platforms/bk7231t/tuya_os_adapter/include/driver/tuya_hal_storge.h
+// REALLY? A typo in Tuya SDK? Storge?
+// tuya-iotos-embeded-sdk-wifi-ble-bk7231t/platforms/bk7231t/tuya_os_adapter/include/driver/tuya_hal_storge.h
 #include "tuya_hal_storge.h"
 #include "BkDriverFlash.h"
 #endif
@@ -44,75 +44,6 @@ static char SUBMIT_AND_END_FORM[] = "<br><input type=\"submit\" value=\"Submit\"
 int tuya_os_adapt_wifi_all_ap_scan(AP_IF_S** ap_ary, unsigned int* num);
 int tuya_os_adapt_wifi_release_ap(AP_IF_S* ap);
 #endif
-
-
-/*
-
-WARNING! THIS IS OBSOLETE NOW!
-
-WE ARE USING THIS DATABASE:
-https://github.com/OpenBekenIOT/webapp/blob/gh-pages/devices.json
-Submit pull requests to the list above! Post teardowns on Elektroda.com!
-
-
-HERE IS FRONTEND:
-https://openbekeniot.github.io/webapp/devicesList.html
-See above link for more info!
-
-*/
-//
-//typedef struct template_s {
-//	void (*setter)();
-//	const char* name;
-//} template_t;
-//
-//template_t g_templates[] = {
-//	{ Setup_Device_Empty, "Empty"},
-//	// BK7231N devices
-//	{ Setup_Device_BK7231N_CB2S_QiachipSmartSwitch, "[BK7231N][CB2S] QiaChip Smart Switch"},
-//	{ Setup_Device_BK7231N_KS_602_TOUCH, "[BK7231N] KS 602 Touch Switch US"},
-//	{ Setup_Device_Aubess_Mini_Smart_Switch_16A, "[BK7231N] Aubess Mini Smart Switch 16A"},
-//	{ Setup_Device_Jinvoo_AC_TV_Box_IR_Controller, "[BK7231N] Jinvoo AC/TV Box IR Controller"},
-//	// BK7231T devices
-//	{ Setup_Device_BK7231T_WB2S_QiachipSmartSwitch, "[BK7231T][WB2S] QiaChip Smart Switch"},
-//	{ Setup_Device_TuyaWL_SW01_16A, "WL SW01 16A"},
-//	{ Setup_Device_TuyaSmartLife4CH10A, "Smart Life 4CH 10A"},
-//	{ Setup_Device_IntelligentLife_NF101A, "Intelligent Life NF101A"},
-//	{ Setup_Device_TuyaLEDDimmerSingleChannel, "Tuya LED Dimmer Single Channel PWM WB3S"},
-//	{ Setup_Device_CalexLEDDimmerFiveChannel, "Calex RGBWW LED Dimmer Five Channel PWM BK7231S"},
-//	{ Setup_Device_CalexPowerStrip_900018_1v1_0UK, "Calex UK power strip 900018.1 v1.0 UK"},
-//	{ Setup_Device_ArlecCCTDownlight, "Arlec CCT LED Downlight ALD029CHA"},
-//	{ Setup_Device_NedisWIFIPO120FWT_16A, "Nedis WIFIPO120FWT SmartPlug 16A"},
-//	{ Setup_Device_NedisWIFIP130FWT_10A, "Nedis WIFIP130FWT SmartPlug 10A"},
-//	{ Setup_Device_BK7231T_Raw_PrimeWiFiSmartOutletsOutdoor_CCWFIO232PK, "Prime SmartOutlet Outdoor 2x Costco"},
-//	{ Setup_Device_EmaxHome_EDU8774, "Emax Home EDU8774 SmartPlug 16A"},
-//	{ Setup_Device_BK7231N_TuyaLightBulb_RGBCW_5PWMs, "Tuya E27 LED RGBCW 5PWMs BK7231N"},
-//	{ Setup_Device_TuyaSmartPFW02G, "Tuya Smart PFW02-G"},
-//	{ Setup_Device_AvatarASL04, "Avatar ASL04 5v LED strip"},
-//	{ Setup_Device_BL602_MagicHome_IR_RGB_LedStrip, "BL602 Magic Home LED RGB IR Strip"},
-//	{ Setup_Device_BL602_MagicHome_CCT_LedStrip, "BL602 Magic Home LED CCT Strip"},
-//	{ Setup_Device_Sonoff_MiniR3, "Sonoff MiniR3"},
-//	{ Setup_Device_WiFi_DIY_Switch_WB2S_ZN268131, "WB2S WiFi DIY Switch ZN268131"},
-//	{ Setup_Device_DS_102_1Gang_WB3S, "DS-102 1 Gang Switch"},
-//	{ Setup_Device_DS_102_2Gang_WB3S, "DS-102 2 Gang Switch"},
-//	{ Setup_Device_DS_102_3Gang_WB3S, "DS-102 3 Gang Switch"},
-//	{ Setup_Device_TuyaSmartWIFISwith_4Gang_CB3S, "[BK7231N][CB3S] Tuya Smart Wifi Switch 4 Gang"},
-//	{ Setup_Device_BK7231N_CB2S_LSPA9_BL0942, "[BK7231N][CB2S] LSPA9 power metering plug BL0942 version"},
-//	{ Setup_Device_LSC_Smart_Connect_Plug_CB2S, "[BK7231N][CB2S] LSC Smart Connect Plug"},
-//	{ Setup_Device_BK7231T_Gosund_Switch_SW5_A_V2_1, "BK7231T Gosund Smart Switch SW5-A-V2.1"},
-//	{ Setup_Device_13A_Socket_CB2S, "BK7231N CB2S 13A Aliexpress socket"},
-//	{ Setup_Device_Deta_Smart_Double_Power_Point_6922HA_Series2, "BK7231T DETA SMART Double Power Point 6922HA-Series 2"},
-//	{ Setup_Device_ArlecRGBCCTDownlight, "Arlec RGB+CCT LED Downlight ALD092RHA"},
-//	{ Setup_Device_CasaLifeCCTDownlight, "CasaLife CCT LED Downlight SMART-AL2017-TGTS"},
-//	{ Setup_Device_Enbrighten_WFD4103, "Enbrighten WFD4103 WiFi Switch BK7231T WB2S"} ,
-//	{ Setup_Device_Zemismart_Light_Switch_KS_811_3, "Zemismart Light Switch (Neutral Optional) KS_811_3"} ,
-//	{ Setup_Device_TeslaSmartPlus_TSL_SPL_1, "Tesla Smart Plug. Model: (TSL-SPL-1)"},
-//	{ Setup_Device_Calex_900011_1_WB2S, "Calex Smart Power Plug 900011.1"},
-//	{ Setup_Device_Immax_NEO_LITE_NAS_WR07W, "Immax NEO Lite. Model: (NAS-WR07W)"} ,
-//	{ Setup_Device_MOES_TouchSwitch_WS_EU1_RFW_N, "MOES Touch Switch 1gang Model:(WS-EU1-RFW-N)"}
-//};
-
-//int g_total_templates = sizeof(g_templates) / sizeof(g_templates[0]);
 
 unsigned char hexdigit(char hex) {
 	return (hex <= '9') ? hex - '0' :
@@ -134,10 +65,10 @@ void postFormAction(http_request_t* request, char* action, char* value) {
 	hprintf255(request, "<form action=\"%s\"><input type=\"submit\" value=\"%s\"/></form>", action, value);
 }
 
-void poststr_h2(http_request_t* request, const char *content) {
+void poststr_h2(http_request_t* request, const char* content) {
 	hprintf255(request, "<h2>%s</h2>", content);
 }
-void poststr_h4(http_request_t* request, const char *content) {
+void poststr_h4(http_request_t* request, const char* content) {
 	hprintf255(request, "<h4>%s</h4>", content);
 }
 
@@ -216,7 +147,7 @@ int http_fn_testmsg(http_request_t* request) {
 extern int g_hiddenChannels;
 
 int http_fn_index(http_request_t* request) {
-	int j, i;
+	int j, i, ch1, ch2;
 	char tmpA[128];
 	int bRawPWMs;
 	bool bForceShowRGBCW;
@@ -224,6 +155,7 @@ int http_fn_index(http_request_t* request) {
 	int iValue;
 	bool bForceShowRGB;
 	const char* inputName;
+	int channelType;
 
 	bRawPWMs = CFG_HasFlag(OBK_FLAG_LED_RAWCHANNELSMODE);
 	bForceShowRGBCW = CFG_HasFlag(OBK_FLAG_LED_FORCESHOWRGBCWCONTROLLER);
@@ -340,7 +272,6 @@ int http_fn_index(http_request_t* request) {
 
 	poststr(request, "<table>");	//Table default to 100% width in stylesheet
 	for (i = 0; i < CHANNEL_MAX; i++) {
-		int channelType;
 
 		channelType = CHANNEL_GetType(i);
 		// check ability to hide given channel from gui
@@ -363,7 +294,45 @@ int http_fn_index(http_request_t* request) {
 		}
 	}
 	poststr(request, "</table>");
+	poststr(request, "<table>");	//Table default to 100% width in stylesheet
+	for (i = 0; i < CHANNEL_MAX; i++) {
 
+
+		// check ability to hide given channel from gui
+		if (BIT_CHECK(g_hiddenChannels, i)) {
+			continue; // hidden
+		}
+
+		channelType = CHANNEL_GetType(i);
+		if (h_isChannelRelay(i) || channelType == ChType_Toggle) {
+			const char* c;
+			const char *prefix;
+			if (i <= 1) {
+				hprintf255(request, "<tr>");
+			}
+			if (CHANNEL_Check(i)) {
+				c = "bgrn";
+			}
+			else {
+				c = "bred";
+			}
+			poststr(request, "<td><form action=\"index\">");
+			hprintf255(request, "<input type=\"hidden\" name=\"tgl\" value=\"%i\">", i);
+
+			if (CHANNEL_ShouldAddTogglePrefixToUI(i)) {
+				prefix = "Toggle ";
+			}
+			else {
+				prefix = "";
+			}
+
+			hprintf255(request, "<input class=\"%s\" type=\"submit\" value=\"%s%s\"/></form></td>", c, prefix, CHANNEL_GetLabel(i));
+			if (i == CHANNEL_MAX - 1) {
+				poststr(request, "</tr>");
+			}
+		}
+	}
+	poststr(request, "</table>");
 	poststr(request, "<table>");	//Table default to 100% width in stylesheet
 	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
 		int role;
@@ -373,16 +342,20 @@ int http_fn_index(http_request_t* request) {
 		if (IS_PIN_DHT_ROLE(role)) {
 			// DHT pin has two channels - temperature and humidity
 			poststr(request, "<tr><td>");
-			iValue = CHANNEL_Get(PIN_GetPinChannelForPinIndex(i));
-			hprintf255(request, "Sensor %s on pin %i temperature %.2fC", PIN_RoleToString(role), i, (float)(iValue*0.1f));
-			iValue = CHANNEL_Get(PIN_GetPinChannel2ForPinIndex(i));
+			ch1 = PIN_GetPinChannelForPinIndex(i);
+			ch2 = PIN_GetPinChannel2ForPinIndex(i);
+			iValue = CHANNEL_Get(ch1);
+			hprintf255(request, "Sensor %s on pin %i temperature %.2fC", PIN_RoleToString(role), i, (float)(iValue * 0.1f));
+			iValue = CHANNEL_Get(ch2);
 			hprintf255(request, ", humidity %.1f%%<br>", (float)iValue);
+			if (ch1 == ch2) {
+				hprintf255(request, "WARNING: you have the same channel set twice for DHT, please fix in pins config, set two different channels");
+			}
 			poststr(request, "</td></tr>");
 		}
 	}
 	for (i = 0; i < CHANNEL_MAX; i++) {
 
-		int channelType;
 
 		// check ability to hide given channel from gui
 		if (BIT_CHECK(g_hiddenChannels, i)) {
@@ -446,9 +419,13 @@ int http_fn_index(http_request_t* request) {
 			poststr(request, "</td></tr>");
 
 		}
-		else if (channelType == ChType_OffLowMidHigh || channelType == ChType_OffLowestLowMidHighHighest || channelType == ChType_LowestLowMidHighHighest) {
+		else if (channelType == ChType_OffLowMidHigh || channelType == ChType_OffLowestLowMidHighHighest
+			|| channelType == ChType_LowestLowMidHighHighest || channelType == ChType_LowMidHighHighest
+			|| channelType == ChType_OffLowMidHighHighest) {
 			const char** types;
 			const char* types4[] = { "Off","Low","Mid","High" };
+			const char* typesLowMidHighHighest[] = { "Low","Mid","High","Highest" };
+			const char* typesOffLowMidHighHighest[] = { "Off", "Low","Mid","High","Highest" };
 			const char* types6[] = { "Off", "Lowest", "Low", "Mid", "High", "Highest" };
 			const char* types5NoOff[] = { "Lowest", "Low", "Mid", "High", "Highest" };
 			int numTypes;
@@ -456,6 +433,14 @@ int http_fn_index(http_request_t* request) {
 			if (channelType == ChType_OffLowMidHigh) {
 				types = types4;
 				numTypes = 4;
+			}
+			else if (channelType == ChType_LowMidHighHighest) {
+				types = typesLowMidHighHighest;
+				numTypes = 4;
+			}
+			else if (channelType == ChType_OffLowMidHighHighest) {
+				types = typesOffLowMidHighHighest;
+				numTypes = 5;
 			}
 			else if (channelType == ChType_LowestLowMidHighHighest) {
 				types = types5NoOff;
@@ -622,22 +607,7 @@ int http_fn_index(http_request_t* request) {
 			poststr(request, "</td></tr>");
 		}
 		else if (h_isChannelRelay(i) || channelType == ChType_Toggle) {
-			const char* c;
-			if (i <= 1) {
-				hprintf255(request, "<tr>");
-			}
-			if (CHANNEL_Check(i)) {
-				c = "bgrn";
-			}
-			else {
-				c = "bred";
-			}
-			poststr(request, "<td><form action=\"index\">");
-			hprintf255(request, "<input type=\"hidden\" name=\"tgl\" value=\"%i\">", i);
-			hprintf255(request, "<input class=\"%s\" type=\"submit\" value=\"Toggle %s\"/></form></td>", c, CHANNEL_GetLabel(i));
-			if (i == CHANNEL_MAX - 1) {
-				poststr(request, "</tr>");
-			}
+			// HANDLED ABOVE in previous loop
 		}
 		else if ((bRawPWMs && h_isChannelPWM(i)) || (channelType == ChType_Dimmer) || (channelType == ChType_Dimmer256) || (channelType == ChType_Dimmer1000)) {
 			int maxValue;
@@ -689,7 +659,11 @@ int http_fn_index(http_request_t* request) {
 
 		lm = LED_GetMode();
 
-		c_pwms = PIN_CountPinsWithRoleOrRole(IOR_PWM, IOR_PWM_n);
+		//c_pwms = PIN_CountPinsWithRoleOrRole(IOR_PWM, IOR_PWM_n);
+		// This will treat multiple PWMs on a single channel as one.
+		// Thanks to this users can turn for example RGB LED controller
+		// into high power 3-outputs single colors LED controller
+		PIN_get_Relay_PWM_Count(0, &c_pwms, 0);
 		if (bForceShowRGBCW) {
 			c_pwms = 5;
 		}
@@ -741,7 +715,7 @@ int http_fn_index(http_request_t* request) {
 			hprintf255(request, "<form action=\"index\" id=\"form%i\">", SPECIAL_CHANNEL_BASECOLOR);
 			// onchange would fire only if colour was changed
 			// onblur will fire every time
-			hprintf255(request, "<input type=\"color\" name=\"%s\" id=\"color%i\" value=\"#%s\" onblur=\"this.form.submit()\">", inputName, SPECIAL_CHANNEL_BASECOLOR, colorValue);
+			hprintf255(request, "<input type=\"color\" name=\"%s\" id=\"color%i\" value=\"#%s\"  oninput=\"this.form.submit()\" >", inputName, SPECIAL_CHANNEL_BASECOLOR, colorValue);
 			hprintf255(request, "<input type=\"hidden\" name=\"%sIndex\" value=\"%i\">", inputName, SPECIAL_CHANNEL_BASECOLOR);
 			hprintf255(request, "<input  type=\"submit\" class='disp-none' value=\"Toggle Light\"/></form>");
 			poststr(request, "</td></tr>");
@@ -757,14 +731,16 @@ int http_fn_index(http_request_t* request) {
 			inputName = "pwm";
 
 			pwmValue = LED_GetTemperature();
-			long pwmKelvin = 1000000 / pwmValue;
+			long pwmKelvin = HASS_TO_KELVIN(pwmValue);
+			long pwmKelvinMax = HASS_TO_KELVIN(led_temperature_min);
+			long pwmKelvinMin = HASS_TO_KELVIN(led_temperature_max);
 
 			poststr(request, "<tr><td>");
 			hprintf255(request, "<h5>LED Temperature Slider %s (%ld K) (Warm <--- ---> Cool)</h5>", activeStr, pwmKelvin);
 			hprintf255(request, "<form class='r' action=\"index\" id=\"form%i\">", SPECIAL_CHANNEL_TEMPERATURE);
 
 			//(KELVIN_TEMPERATURE_MAX - KELVIN_TEMPERATURE_MIN) / (HASS_TEMPERATURE_MAX - HASS_TEMPERATURE_MIN) = 13
-			hprintf255(request, "<input type=\"range\" step='13' min=\"%ld\" max=\"%ld\" ", KELVIN_TEMPERATURE_MIN, KELVIN_TEMPERATURE_MAX);
+			hprintf255(request, "<input type=\"range\" step='13' min=\"%ld\" max=\"%ld\" ", pwmKelvinMin, pwmKelvinMax);
 			hprintf255(request, "value=\"%ld\" onchange=\"submitTemperature(this);\"/>", pwmKelvin);
 
 			hprintf255(request, "<input type=\"hidden\" name=\"%sIndex\" value=\"%i\"/>", inputName, SPECIAL_CHANNEL_TEMPERATURE);
@@ -834,7 +810,7 @@ int http_fn_index(http_request_t* request) {
 		hprintf255(request, "</h5>");
 	}
 	hprintf255(request, "<h5>Cfg size: %i, change counter: %i, ota counter: %i, boot incompletes %i (might change to 0 if you wait to 30 sec)!</h5>",
-		sizeof(g_cfg), g_cfg.changeCounter, g_cfg.otaCounter, Main_GetLastRebootBootFailures());
+		sizeof(g_cfg), g_cfg.changeCounter, g_cfg.otaCounter, g_bootFailures);
 
 	inputName = CFG_GetPingHost();
 	if (inputName && *inputName && CFG_GetPingDisconnectedSecondsToRestart()) {
@@ -855,12 +831,13 @@ int http_fn_index(http_request_t* request) {
 		hprintf255(request, "<h5>MQTT State: not configured<br>");
 	}
 	else {
-		const char *stateStr;
-		const char *colorStr;
+		const char* stateStr;
+		const char* colorStr;
 		if (mqtt_reconnect > 0) {
 			stateStr = "awaiting reconnect";
 			colorStr = "orange";
-		} else if (Main_HasMQTTConnected() == 1) {
+		}
+		else if (Main_HasMQTTConnected() == 1) {
 			stateStr = "connected";
 			colorStr = "green";
 		}
@@ -869,7 +846,7 @@ int http_fn_index(http_request_t* request) {
 			colorStr = "yellow";
 		}
 		hprintf255(request, "<h5>MQTT State: <span style=\"color:%s\">%s</span> RES: %d(%s)<br>", colorStr,
-			stateStr,MQTT_GetConnectResult(), get_error_name(MQTT_GetConnectResult()));
+			stateStr, MQTT_GetConnectResult(), get_error_name(MQTT_GetConnectResult()));
 		hprintf255(request, "MQTT ErrMsg: %s <br>", (MQTT_GetStatusMessage() != NULL) ? MQTT_GetStatusMessage() : "");
 		hprintf255(request, "MQTT Stats:CONN: %d PUB: %d RECV: %d ERR: %d </h5>", MQTT_GetConnectEvents(),
 			MQTT_GetPublishEventCounter(), MQTT_GetReceivedEventCounter(), MQTT_GetPublishErrorCounter());
@@ -916,7 +893,7 @@ int http_fn_index(http_request_t* request) {
 #endif
 	if (bSafeMode) {
 		hprintf255(request, "<h5 class='safe'>You are in safe mode (AP mode) because full reboot failed %i times. ",
-			Main_GetLastRebootBootFailures());
+			g_bootFailures);
 		hprintf255(request, "Pins, relays, etc are disabled.</h5>");
 
 	}
@@ -976,6 +953,53 @@ int http_fn_cfg_mqtt(http_request_t* request) {
 	add_label_password_field(request, "Password", "password", CFG_GetMQTTPass(), "<br>");
 
 	poststr(request, "<br><input type=\"submit\" value=\"Submit\" onclick=\"return confirm('Are you sure? Please check MQTT data twice?')\"></form> ");
+	poststr(request, htmlFooterReturnToCfgLink);
+	http_html_end(request);
+	poststr(request, NULL);
+	return 0;
+}
+
+int http_fn_cfg_ip(http_request_t* request) {
+	char tmp[64];
+	int g_changes = 0;
+	byte ip[4];
+	http_setup(request, httpMimeTypeHTML);
+	http_html_start(request, "IP");
+	poststr_h2(request, "Here you can set static IP or DHCP");
+	hprintf255(request, "<h4>This setting applies only to WiFi client mode.</h4>");
+	hprintf255(request, "<h4>You must restart manually for changes to take place.</h4>");
+	hprintf255(request, "<h4>Currently, DHCP is enabled by default and works when you set IP to 0.0.0.0.</h4>");
+
+	if (http_getArg(request->url, "IP", tmp, sizeof(tmp))) {
+		str_to_ip(tmp, g_cfg.staticIP.localIPAddr);
+		g_changes++;
+	}
+	if (http_getArg(request->url, "mask", tmp, sizeof(tmp))) {
+		str_to_ip(tmp, g_cfg.staticIP.netMask);
+		g_changes++;
+	}
+	if (http_getArg(request->url, "dns", tmp, sizeof(tmp))) {
+		str_to_ip(tmp, g_cfg.staticIP.dnsServerIpAddr);
+		g_changes++;
+	}
+	if (http_getArg(request->url, "gate", tmp, sizeof(tmp))) {
+		str_to_ip(tmp, g_cfg.staticIP.gatewayIPAddr);
+		g_changes++;
+	}
+	if (g_changes) {
+		CFG_MarkAsDirty();
+		hprintf255(request, "<h4>Saved.</h4>");
+	}
+	convert_IP_to_string(tmp, g_cfg.staticIP.localIPAddr);
+	add_label_text_field(request, "IP", "IP", tmp, "<form action=\"/cfg_ip\">");
+	convert_IP_to_string(tmp, g_cfg.staticIP.netMask);
+	add_label_text_field(request, "Mask", "mask", tmp, "<br><br>");
+	convert_IP_to_string(tmp, g_cfg.staticIP.dnsServerIpAddr);
+	add_label_text_field(request, "DNS", "dns", tmp, "<br>");
+	convert_IP_to_string(tmp, g_cfg.staticIP.gatewayIPAddr);
+	add_label_text_field(request, "Gate", "gate", tmp, "<br>");
+
+	poststr(request, "<br><input type=\"submit\" value=\"Submit\" onclick=\"return confirm('Are you sure? Remember that you need to reboot manually to apply changes')\"></form> ");
 	poststr(request, htmlFooterReturnToCfgLink);
 	http_html_end(request);
 	poststr(request, NULL);
@@ -1424,7 +1448,7 @@ int http_fn_flash_read_tool(http_request_t* request) {
 	poststr(request, NULL);
 	return 0;
 }
-const char *CMD_GetResultString(commandResult_t r) {
+const char* CMD_GetResultString(commandResult_t r) {
 	if (r == CMD_RES_OK)
 		return "OK";
 	if (r == CMD_RES_EMPTY_STRING)
@@ -1444,9 +1468,9 @@ void LOG_SetCommandHTTPRedirectReply(http_request_t* request);
 
 int http_fn_cmd_tool(http_request_t* request) {
 	commandResult_t res;
-	const char *resStr;
+	const char* resStr;
 	char tmpA[128];
-	char *long_str_alloced = 0;
+	char* long_str_alloced = 0;
 	int commandLen;
 
 	http_setup(request, httpMimeTypeHTML);
@@ -1500,18 +1524,17 @@ int http_fn_startup_command(http_request_t* request) {
 		"You can use them to init peripherals and drivers, like BL0942 energy sensor. "
 		"Use backlog cmd1; cmd2; cmd3; etc to enter multiple commands</p>");
 
-	if (http_getArg(request->url, "data", tmpA, sizeof(tmpA))) {
+	if (http_getArg(request->url, "startup_cmd", tmpA, sizeof(tmpA))) {
+		http_getArg(request->url, "data", tmpA, sizeof(tmpA));
 		//  hprintf255(request,"<h3>Set command to  %s!</h3>",tmpA);
-		  // tmpA can be longer than 128 bytes and this would crash
+		// tmpA can be longer than 128 bytes and this would crash
 		hprintf255(request, "<h3>Command changed!</h3>");
 		CFG_SetShortStartupCommand(tmpA);
-
 		CFG_Save_IfThereArePendingChanges();
-	}
-	else {
 	}
 
 	add_label_text_field(request, "Startup command", "data", CFG_GetShortStartupCommand(), "<form action=\"/startup_command\">");
+	poststr(request, "<input type='hidden' name='startup_cmd' value='1'>");
 	poststr(request, SUBMIT_AND_END_FORM);
 
 	poststr(request, htmlFooterReturnToCfgLink);
@@ -1563,53 +1586,7 @@ int http_fn_uart_tool(http_request_t* request) {
 	return 0;
 }
 
-
-
-
-int http_fn_cfg_quick(http_request_t* request) {
-	http_setup(request, httpMimeTypeHTML);
-	http_html_start(request, "Quick Config");
-	poststr_h4(request, "Quick Config");
-
-
-	/*
-
-	WARNING! THIS IS OBSOLETE NOW!
-
-	WE ARE USING THIS DATABASE:
-	https://github.com/OpenBekenIOT/webapp/blob/gh-pages/devices.json
-	Submit pull requests to the list above! Post teardowns on Elektroda.com!
-
-
-	HERE IS FRONTEND:
-	https://openbekeniot.github.io/webapp/devicesList.html
-	See above link for more info!
-
-	*/
-
-	poststr(request, "<h3>This is now obsolete. Please config through Web App and refer to the Devices List.</h3>");
-
-
-	/*if (http_getArg(request->url, "dev", tmpA, sizeof(tmpA))) {
-		j = atoi(tmpA);
-		hprintf255(request, "<h3>Set dev %i!</h3>", j);
-		g_templates[j].setter();
-	}
-	poststr(request, "<form action=\"cfg_quick\">");
-	poststr(request, "<select name=\"dev\">");
-	for (j = 0; j < g_total_templates; j++) {
-		hprintf255(request, "<option value=\"%i\">%s</option>", j, g_templates[j].name);
-	}
-	poststr(request, "</select>");
-	poststr(request, "<input type=\"submit\" value=\"Set\"/></form>");*/
-
-	poststr(request, htmlFooterReturnToCfgLink);
-	http_html_end(request);
-	poststr(request, NULL);
-	return 0;
-}
-
-void doHomeAssistantDiscovery(const char *topic, http_request_t *request) {
+void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 	int i;
 	int relayCount;
 	int pwmCount;
@@ -1617,6 +1594,7 @@ void doHomeAssistantDiscovery(const char *topic, http_request_t *request) {
 	bool ledDriverChipRunning;
 	HassDeviceInfo* dev_info = NULL;
 	bool measuringPower = false;
+	bool measuringBattery = false;
 	struct cJSON_Hooks hooks;
 	bool discoveryQueued = false;
 
@@ -1626,9 +1604,10 @@ void doHomeAssistantDiscovery(const char *topic, http_request_t *request) {
 
 #ifndef OBK_DISABLE_ALL_DRIVERS
 	measuringPower = DRV_IsMeasuringPower();
+	measuringBattery = DRV_IsMeasuringBattery();
 #endif
 
-	get_Relay_PWM_Count(&relayCount, &pwmCount, &dInputCount);
+	PIN_get_Relay_PWM_Count(&relayCount, &pwmCount, &dInputCount);
 
 	ledDriverChipRunning = LED_IsLedDriverChipRunning();
 
@@ -1639,7 +1618,12 @@ void doHomeAssistantDiscovery(const char *topic, http_request_t *request) {
 	if (relayCount > 0) {
 		for (i = 0; i < CHANNEL_MAX; i++) {
 			if (h_isChannelRelay(i)) {
-				dev_info = hass_init_relay_device_info(i);
+				if (CFG_HasFlag(OBK_FLAG_MQTT_HASS_ADD_RELAYS_AS_LIGHTS)) {
+					dev_info = hass_init_relay_device_info(i, LIGHT_ON_OFF);
+				}
+				else {
+					dev_info = hass_init_relay_device_info(i, RELAY);
+				}
 				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
 				hass_free_device_info(dev_info);
 				dev_info = NULL;
@@ -1660,7 +1644,7 @@ void doHomeAssistantDiscovery(const char *topic, http_request_t *request) {
 		}
 	}
 
-	if (pwmCount == 5 || ledDriverChipRunning) {
+	if (pwmCount == 5 || ledDriverChipRunning || (pwmCount == 4 && CFG_HasFlag(OBK_FLAG_LED_EMULATE_COOL_WITH_RGB))) {
 		if (dev_info == NULL) {
 			dev_info = hass_init_light_device_info(LIGHT_RGBCW);
 		}
@@ -1706,6 +1690,18 @@ void doHomeAssistantDiscovery(const char *topic, http_request_t *request) {
 	}
 #endif
 
+	if (measuringBattery == true) {
+		dev_info = hass_init_sensor_device_info(BATTERY_SENSOR, 0);
+		MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+		hass_free_device_info(dev_info);
+
+		dev_info = hass_init_sensor_device_info(BATTERY_VOLTAGE_SENSOR, 0);
+		MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+		hass_free_device_info(dev_info);
+
+		discoveryQueued = true;
+	}
+
 	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
 		if (IS_PIN_DHT_ROLE(g_cfg.pins.roles[i]) || IS_PIN_TEMP_HUM_SENSOR_ROLE(g_cfg.pins.roles[i])) {
 			dev_info = hass_init_sensor_device_info(TEMPERATURE_SENSOR, PIN_GetPinChannelForPinIndex(i));
@@ -1718,13 +1714,24 @@ void doHomeAssistantDiscovery(const char *topic, http_request_t *request) {
 
 			discoveryQueued = true;
 		}
+		else if (IS_PIN_AIR_SENSOR_ROLE(g_cfg.pins.roles[i])) {
+			dev_info = hass_init_sensor_device_info(CO2_SENSOR, PIN_GetPinChannelForPinIndex(i));
+			MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+			hass_free_device_info(dev_info);
+
+			dev_info = hass_init_sensor_device_info(TVOC_SENSOR, PIN_GetPinChannel2ForPinIndex(i));
+			MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+			hass_free_device_info(dev_info);
+
+			discoveryQueued = true;
+		}
 	}
 
 	if (discoveryQueued) {
 		MQTT_InvokeCommandAtEnd(PublishChannels);
 	}
 	else {
-		const char *msg = "No relay, PWM, sensor or power driver running.";
+		const char* msg = "No relay, PWM, sensor or power driver running.";
 		if (request) {
 			poststr(request, msg);
 			poststr(request, NULL);
@@ -1783,7 +1790,7 @@ void http_generate_cw_cfg(http_request_t* request, const char* clientId) {
 	http_generate_singleColor_cfg(request, clientId);
 }
 
-void hprintf_qos_payload(http_request_t* request, const char *clientId){
+void hprintf_qos_payload(http_request_t* request, const char* clientId) {
 	poststr(request, "    qos: 1\n");
 	poststr(request, "    payload_on: 1\n");
 	poststr(request, "    payload_off: 0\n");
@@ -1817,7 +1824,7 @@ int http_fn_ha_cfg(http_request_t* request) {
 
 	poststr(request, "<textarea rows=\"40\" cols=\"50\">");
 
-	get_Relay_PWM_Count(&relayCount, &pwmCount, &dInputCount);
+	PIN_get_Relay_PWM_Count(&relayCount, &pwmCount, &dInputCount);
 
 	if (relayCount > 0) {
 
@@ -1964,23 +1971,9 @@ int http_fn_ha_cfg(http_request_t* request) {
 	return 0;
 }
 
-const char *skipToNextWord(const char *p) {
-	while (isWhiteSpace(*p) == false) {
-		if (*p == 0)
-			return p;
-		p++;
-	}
-	while (isWhiteSpace(*p)) {
-		if (*p == 0)
-			return p;
-		p++;
-	}
-	return p;
-}
-
 int http_fn_cm(http_request_t* request) {
 	char tmpA[128];
-	char *long_str_alloced = 0;
+	char* long_str_alloced = 0;
 	int commandLen;
 
 	http_setup(request, httpMimeTypeJson);
@@ -2016,8 +2009,8 @@ int http_fn_cfg(http_request_t* request) {
 	postFormAction(request, "cfg_generic", "Configure General/Flags");
 	postFormAction(request, "cfg_startup", "Configure Startup");
 	postFormAction(request, "cfg_dgr", "Configure Device Groups");
-	postFormAction(request, "cfg_quick", "Quick Config");
 	postFormAction(request, "cfg_wifi", "Configure WiFi");
+	postFormAction(request, "cfg_ip", "Configure IP");
 	postFormAction(request, "cfg_mqtt", "Configure MQTT");
 	postFormAction(request, "cfg_name", "Configure Names");
 	postFormAction(request, "cfg_mac", "Change MAC");
@@ -2058,9 +2051,9 @@ int http_fn_cfg_pins(http_request_t* request) {
 
 	http_setup(request, httpMimeTypeHTML);
 	http_html_start(request, "Pin config");
-	poststr(request, "<p>The first textfield is used to enter channel index (relay index), used to support multiple relays and buttons. ");
+	poststr(request, "<p>The first field assigns a role to the given pin. The next field is used to enter channel index (relay index), used to support multiple relays and buttons. ");
 	poststr(request, "So, first button and first relay should have channel 1, second button and second relay have channel 2, etc.</p>");
-	poststr(request, "<p>The second textfield (only for buttons) is used to enter channel to toggle when doing double click. ");
+	poststr(request, "<p>Only for button roles another field will be provided to enter channel to toggle when doing double click. ");
 	poststr(request, "It shows up when you change role to button and save.</p>");
 #if PLATFORM_BK7231N || PLATFORM_BK7231T
 	poststr(request, "<p>BK7231N/BK7231T supports PWM only on pins 6, 7, 8, 9, 24 and 26!</p>");
@@ -2175,17 +2168,18 @@ int http_fn_cfg_pins(http_request_t* request) {
 		poststr(request, "</select>");
 		// Primary linked channel
 		// Some roles do not need any channels
-		if (si != IOR_SHT3X_CLK && si != IOR_CHT8305_CLK && si != IOR_Button_ToggleAll && si != IOR_Button_ToggleAll_n
+		if ((si != IOR_SGP_CLK && si != IOR_SHT3X_CLK && si != IOR_CHT8305_CLK && si != IOR_Button_ToggleAll && si != IOR_Button_ToggleAll_n
 			&& si != IOR_BL0937_CF && si != IOR_BL0937_CF1 && si != IOR_BL0937_SEL
 			&& si != IOR_LED_WIFI && si != IOR_LED_WIFI_n && si != IOR_LED_WIFI_n
 			&& !(si >= IOR_IRRecv && si <= IOR_DHT11)
 			&& !(si >= IOR_SM2135_DAT && si <= IOR_BP1658CJ_CLK))
+			|| IS_PIN_DHT_ROLE(si))
 		{
 			hprintf255(request, "<input class=\"hele\" name=\"r%i\" type=\"text\" value=\"%i\"/>", i, ch);
 		}
 		// Secondary linked channel
 		// For button, is relay index to toggle on double click
-		if (si == IOR_Button || si == IOR_Button_n || IS_PIN_DHT_ROLE(si) || IS_PIN_TEMP_HUM_SENSOR_ROLE(si) )
+		if (si == IOR_Button || si == IOR_Button_n || IS_PIN_DHT_ROLE(si) || IS_PIN_TEMP_HUM_SENSOR_ROLE(si) || IS_PIN_AIR_SENSOR_ROLE(si))
 		{
 			hprintf255(request, "<input class=\"hele\" name=\"e%i\" type=\"text\" value=\"%i\"/>", i, ch2);
 		}
@@ -2198,6 +2192,8 @@ int http_fn_cfg_pins(http_request_t* request) {
 	poststr(request, NULL);
 	return 0;
 }
+
+
 const char* g_obk_flagNames[] = {
 	"[MQTT] Broadcast led params together (send dimmer and color when dimmer or color changes, topic name: YourDevName/led_basecolor_rgb/get, YourDevName/led_dimmer/get)",
 	"[MQTT] Broadcast led final color (topic name: YourDevName/led_finalcolor_rgb/get)",
@@ -2225,13 +2221,9 @@ const char* g_obk_flagNames[] = {
 	"[LED] Automatically enable Light on any change of brightness, color or temperature",
 	"[LED] Emulate Cool White with RGB in device with four PWMS - Red is 0, Green 1, Blue 2, and Warm is 4",
 	"[POWER] Allow negative current/power for power measurement (all chips, BL0937, BL0942, etc)",
-#if PLATFORM_BL602
-	"[UART] Use alternate UART for BL0942, CSE, TuyaMCU, etc. If marked, uses /dev/ttyS1, otherwise S0",
-#elif PLATFORM_BEKEN
-	"[UART] Use alternate UART for BL0942, CSE, TuyaMCU, etc. If marked, uses UART2, otherwise UART1",
-#else
+	// On BL602, if marked, uses /dev/ttyS1, otherwise S0
+	// On Beken, if marked, uses UART2, otherwise UART1
 	"[UART] Use alternate UART for BL0942, CSE, TuyaMCU, etc",
-#endif
 	"[HASS] Invoke HomeAssistant discovery on change to ip address, configuration",
 	"[LED] Setting RGB white (FFFFFF) enables temperature mode",
 	"[NETIF] Use short device name as a hostname instead of a long name",
@@ -2239,17 +2231,18 @@ const char* g_obk_flagNames[] = {
 	"[UART] Enable UART command line",
 	"[LED] Use old linear brightness mode, ignore gamma ramp",
 	"[MQTT] Apply channel type multiplier on (if any) on channel value before publishing it",
+	"[MQTT] In HA discovery, add relays as lights",
+	"[HASS] Deactivate avty_t flag for sensor when publishing to HASS (permit to keep value). You must restart HASS discovery for change to take effect.",
+	"[DRV] Deactivate Autostart of all drivers",
+	"[WiFi] Quick connect to WiFi on reboot (TODO: check if it works for you and report on github)",
+	"[Power] Set power and current to zero if all relays are open",
+	"[MQTT] [Debug] Publish all channels (don't enable it, it will be publish all 64 possible channels on connect)",
 	"error",
 	"error",
 	"error",
 	"error",
 	"error",
-	"error",
-	"error",
-	"error",
-	"error",
-	"error",
-};
+}; 
 int http_fn_cfg_generic(http_request_t* request) {
 	int i;
 	char tmpA[64];
@@ -2470,7 +2463,7 @@ int http_fn_cfg_dgr(http_request_t* request) {
 
 void XR809_RequestOTAHTTP(const char* s);
 
-void OTA_RequestDownloadFromHTTP(const char *s) {
+void OTA_RequestDownloadFromHTTP(const char* s) {
 #if WINDOWS
 
 #elif PLATFORM_BL602

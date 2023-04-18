@@ -4,7 +4,7 @@
 
 void Test_ChangeHandlers() {
 	// reset whole device
-	SIM_ClearOBK();
+	SIM_ClearOBK(0);
 	SIM_ClearAndPrepareForMQTTTesting("handlerTester", "bekens");
 
 	// this will only happens when Channel1 value changes from not equal to 0 to the one equal to 0
@@ -47,6 +47,58 @@ void Test_ChangeHandlers() {
 	SELFTEST_ASSERT_CHANNEL(1, 0);
 	SELFTEST_ASSERT_CHANNEL(10, 4444);
 	SELFTEST_ASSERT_CHANNEL(11, 22);
+
+	SELFTEST_ASSERT_CHANNEL(7, 0);
+	SELFTEST_ASSERT_CHANNEL(8, 0);
+	// when channel 7 value changes, add one to channel 8
+	CMD_ExecuteCommand("addEventHandler OnChannelChange 7 addChannel 8 1", 0);
+	SELFTEST_ASSERT_CHANNEL(7, 0);
+	SELFTEST_ASSERT_CHANNEL(8, 0);
+	CMD_ExecuteCommand("toggleChannel 7", 0);
+	SELFTEST_ASSERT_CHANNEL(7, 1);
+	SELFTEST_ASSERT_CHANNEL(8, 1);
+	CMD_ExecuteCommand("toggleChannel 7", 0);
+	SELFTEST_ASSERT_CHANNEL(7, 0);
+	SELFTEST_ASSERT_CHANNEL(8, 2);
+	CMD_ExecuteCommand("toggleChannel 7", 0);
+	SELFTEST_ASSERT_CHANNEL(7, 1);
+	SELFTEST_ASSERT_CHANNEL(8, 3);
+	CMD_ExecuteCommand("setChannel 7 1", 0);
+	// there was no change!
+	SELFTEST_ASSERT_CHANNEL(7, 1);
+	SELFTEST_ASSERT_CHANNEL(8, 3);
+	CMD_ExecuteCommand("setChannel 7 1", 0);
+	// there was no change!
+	SELFTEST_ASSERT_CHANNEL(7, 1);
+	SELFTEST_ASSERT_CHANNEL(8, 3);
+	CMD_ExecuteCommand("setChannel 7 1", 0);
+	// there was no change!
+	SELFTEST_ASSERT_CHANNEL(7, 1);
+	SELFTEST_ASSERT_CHANNEL(8, 3);
+	CMD_ExecuteCommand("setChannel 7 0", 0);
+	// changed value.
+	SELFTEST_ASSERT_CHANNEL(7, 0);
+	SELFTEST_ASSERT_CHANNEL(8, 4);
+	CMD_ExecuteCommand("setChannel 7 1", 0);
+	// changed value.
+	SELFTEST_ASSERT_CHANNEL(7, 1);
+	SELFTEST_ASSERT_CHANNEL(8, 5);
+	CMD_ExecuteCommand("setChannel 7 2", 0);
+	// changed value.
+	SELFTEST_ASSERT_CHANNEL(7, 2);
+	SELFTEST_ASSERT_CHANNEL(8, 6);
+	CMD_ExecuteCommand("setChannel 7 3", 0);
+	// changed value.
+	SELFTEST_ASSERT_CHANNEL(7, 3);
+	SELFTEST_ASSERT_CHANNEL(8, 7);
+	CMD_ExecuteCommand("setChannel 7 3", 0);
+	// there was no change!
+	SELFTEST_ASSERT_CHANNEL(7, 3);
+	SELFTEST_ASSERT_CHANNEL(8, 7);
+	CMD_ExecuteCommand("setChannel 7 2", 0);
+	// changed value.
+	SELFTEST_ASSERT_CHANNEL(7, 2);
+	SELFTEST_ASSERT_CHANNEL(8, 8);
 
 	SIM_ClearMQTTHistory();
 

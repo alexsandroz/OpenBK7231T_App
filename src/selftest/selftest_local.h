@@ -16,6 +16,7 @@ void SelfTest_Failed(const char *file, const char *function, int line, const cha
 #define SELFTEST_ASSERT_FLOATCOMPARE(exp, res) SELFTEST_ASSERT(Float_Equals(exp, res));
 #define SELFTEST_ASSERT_EXPRESSION(exp, res) SELFTEST_ASSERT(Float_Equals(CMD_EvaluateExpression(exp,0), res));
 #define SELFTEST_ASSERT_CHANNEL(channelIndex, res) SELFTEST_ASSERT(Float_Equals(CHANNEL_Get(channelIndex), res));
+#define SELFTEST_ASSERT_CHANNELTYPE(channelIndex, res) SELFTEST_ASSERT(CHANNEL_GetType(channelIndex)==res);
 #define SELFTEST_ASSERT_PIN_BOOLEAN(pinIndex, res) SELFTEST_ASSERT((SIM_GetSimulatedPinValue(pinIndex)== res));
 #define SELFTEST_ASSERT_ARGUMENT(argumentIndex, res) SELFTEST_ASSERT(!strcmp(Tokenizer_GetArg(argumentIndex), res));
 #define SELFTEST_ASSERT_ARGUMENT_INTEGER(argumentIndex, res) SELFTEST_ASSERT((Tokenizer_GetArgInteger(argumentIndex)== res));
@@ -33,6 +34,8 @@ void SelfTest_Failed(const char *file, const char *function, int line, const cha
 #define SELFTEST_ASSERT_HAD_MQTT_PUBLISH_FLOAT(topic, value, bRetain) SELFTEST_ASSERT(SIM_CheckMQTTHistoryForFloat(topic,value,bRetain));
 #define SELFTEST_ASSERT_FLAG(flag, value) SELFTEST_ASSERT(CFG_HasFlag(flag)==value);
 #define SELFTEST_ASSERT_HAS_MQTT_JSON_SENT(topic, bPrefixMode) SELFTEST_ASSERT(!SIM_BeginParsingMQTTJSON(topic, bPrefixMode));
+#define SELFTEST_ASSERT_HAS_MQTT_JSON_SENT_ANY(topic, bPrefixMode, object1, object2, key, value) SELFTEST_ASSERT(SIM_HasMQTTHistoryStringWithJSONPayload(topic, bPrefixMode, object1, object2, key, value));
+
 
 //#define FLOAT_EQUALS (a,b) (fabs(a-b)<0.001f)
 inline bool Float_Equals(float a, float b) {
@@ -59,6 +62,8 @@ inline const char *va(const char *fmt, ...) {
 }
 
 
+void Test_TwoPWMsOneChannel();
+void Test_ClockEvents();
 void Test_Commands_Channels();
 void Test_LEDDriver();
 void Test_TuyaMCU_Basic();
@@ -88,6 +93,12 @@ void Test_Role_ToggleAll();
 void Test_Demo_SimpleShuttersScript();
 void Test_Commands_Generic();
 void Test_ChangeHandlers_MQTT();
+void Test_Commands_Calendar();
+void Test_CFG_Via_HTTP();
+void Test_Demo_ButtonScrollingChannelValues();
+void Test_Demo_ButtonToggleGroup();
+void Test_Role_ToggleAll_2();
+void Test_WaitFor();
 
 void Test_GetJSONValue_Setup(const char *text);
 void Test_FakeHTTPClientPacket_GET(const char *tg);
@@ -114,6 +125,7 @@ void SIM_SendFakeMQTTRawChannelSet(int channelIndex, const char *arguments);
 void SIM_SendFakeMQTTRawChannelSet_ViaGroupTopic(int channelIndex, const char *arguments);
 void SIM_ClearMQTTHistory();
 bool SIM_CheckMQTTHistoryForString(const char *topic, const char *value, bool bRetain);
+bool SIM_HasMQTTHistoryStringWithJSONPayload(const char *topic, bool bPrefixMode, const char *object1, const char *object2, const char *key, const char *value);
 bool SIM_CheckMQTTHistoryForFloat(const char *topic, float value, bool bRetain);
 const char *SIM_GetMQTTHistoryString(const char *topic, bool bPrefixMode);
 bool SIM_BeginParsingMQTTJSON(const char *topic, bool bPrefixMode);
