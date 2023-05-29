@@ -77,7 +77,6 @@ jobs:
           architecture: 'x64'
       - name: Install dependencies
         run: |
-          sudo rm -rf /home/runner/work/
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get -y install libc6-i386 make
