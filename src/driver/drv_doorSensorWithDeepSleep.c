@@ -77,6 +77,8 @@ void DoorDeepSleep_OnEverySecond() {
 					g_cfg.pins.roles[i] == IOR_DoorSensorWithDeepSleep_pd) {
 					sprintf(tmp, "%i", g_cfg.pins.channels[i]);
 					bValue = BIT_CHECK(g_initialPinStates, i);
+					//Toogle for tuya default
+					bValue ^= 1;
 					MQTT_PublishMain_StringInt(tmp,bValue);
 				}
 			}
