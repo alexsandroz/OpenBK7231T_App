@@ -20,7 +20,6 @@ Do not add anything here, as it will overwritten with next rebuild.
 | ShortName | [Name] | Sets the short name of the device. |
 | FriendlyName | [Name] | Sets the full name of the device |
 | PinDeepSleep |  | Starts a pin deep sleep (deep sleep that can be interrupted by external IO events like a button press) |
-| SetFlag | [FlagIndex][1or0] | Enables/disables given flag. |
 | FullBootTime | [Value] | Sets time in seconds after which boot is marked as valid. This is related to emergency AP mode which is enabled by powering on/off device 5 times quickly. |
 | SetChannelLabel | [ChannelIndex][Str][bHideTogglePrefix] | Sets a channel label for UI. If you use 1 for bHideTogglePrefix, then the 'Toggle ' prefix from button will be omitted |
 | MapRanges | [TargetChannel][InputValue][RangeVal0][RangeVal1][RangeValN] | This will set given channel to an index showing where given input value is within given range sections. For example, MapRanges 10 0.5 0.3 0.6 0.9 will set channel 10 to 1 because 0.5 value is between 0.3 and 0.6 |
@@ -37,6 +36,7 @@ Do not add anything here, as it will overwritten with next rebuild.
 | restart |  | Reboots the module |
 | reboot |  | Same as restart. Needed for bkWriter 1.60 which sends 'reboot' cmd before trying to get bus |
 | clearConfig |  | Clears all config, including WiFi data |
+| clearIO |  | Clears all pins setting, channels settings |
 | clearAll |  | Clears config and all remaining features, like runtime scripts, events, etc |
 | DeepSleep | [Seconds] | Starts deep sleep for given amount of seconds. Please remember that there is also a separate command, called PinDeepSleep, which is not using a timer, but a GPIO to wake up device. |
 | PowerSave | [Optional 1 or 0, by default 1 is assumed] | Enables dynamic power saving mode on BK and W600. You can also disable power saving with PowerSave 0. |
@@ -47,12 +47,15 @@ Do not add anything here, as it will overwritten with next rebuild.
 | ota_http | [HTTP_URL] | Starts the firmware update procedure, the argument should be a reachable HTTP server file. You can easily setup HTTP server with Xampp, or Visual Code, or Python, etc. Make sure you are using OTA file for a correct platform (getting N platform RBL on T will brick device, etc etc) |
 | scheduleHADiscovery | [Seconds] | This will schedule HA discovery, the discovery will happen with given number of seconds, but timer only counts when MQTT is connected. It will not work without MQTT online, so you must set MQTT credentials first. |
 | flags | [IntegerValue] | Sets the device flags |
+| SetFlag | [FlagIndex][0or1] | Sets given flag |
 | ClearNoPingTime |  | Command for ping watchdog; it sets the 'time since last ping reply' to 0 again |
 | SetStartValue | [Channel][Value] | Sets the startup value for a channel. Used for start values for relays. Use 1 for High, 0 for low and -1 for 'remember last state' |
 | OpenAP |  | Temporarily disconnects from programmed WiFi network and opens Access Point |
+| DSEdge | [edgeCode] | DoorSensor driver configuration command. 0 means always wake up on rising edge, 1 means on falling, 2 means if state is high, use falling edge, if low, use rising. Default is 2 |
 | SafeMode |  | Forces device reboot into safe mode (open ap with disabled drivers) |
 | PingInterval | [IntegerSeconds] | Sets the interval between ping attempts for ping watchdog mechanism |
 | PingHost | [IPStr] | Sets the host to ping by IP watchdog |
+| StartupCommand | [Command in quotation marks][bRunAfter] | Sets the new startup command (short startup command, the one stored in config) to given string. Second argument is optional, if set to 1, command will be also executed after setting |
 | led_dimmer | [Value] | set output dimmer 0..100 |
 | Dimmer | [Value] | Alias for led_dimmer |
 | add_dimmer | [Value][AddMode] | Adds a given value to current LED dimmer. AddMode 0 just adds a value (with a clamp to [0,100]), AddMode 1 will wrap around values (going under 0 goes to 100, going over 100 goes to 0), AddMode 2 will ping-pong value (going to 100 starts going back from 100 to 0, and again, going to 0 starts going up). |
@@ -74,7 +77,9 @@ Do not add anything here, as it will overwritten with next rebuild.
 | HSBColor3 | [Brightness] | Tasmota-style colour access. Sets brightness in 0 to 100 range. |
 | led_finishFullLerp |  | This will force-finish LED color interpolation. You can call it after setting the colour to skip the interpolation/smooth transition time. Of course, it makes only sense if you enabled smooth colour transitions. |
 | led_gammaCtrl | sub-cmd [par] | control LED Gamma Correction and Calibration<br/>e.g.:led_gammaCtrl on |
-| CTRange | ctRange |  |
+| CTRange | [MinRange][MaxRange] | This sets the temperature range for display. Default is 154-500. |
+| DimmerDelta | [DeltaValue] | This sets the delta value for SmartDimmer/SmartButtonForLEDs hold event. This determines the amount of change of dimmer per hold event. |
+| led_saveInterval | [IntervalSeconds] | This determines how often LED state can be saved to flash memory. The state is saved only if it was modified and if the flag for LED state save is enabled. Set this to higher value if you are changing LED states very often, for example from xLights. Saving too often could wear out flash memory too fast. |
 | addRepeatingEvent | [IntervalSeconds][RepeatsOr-1][CommandToRun] | Starts a timer/interval command. Use 'backlog' to fit multiple commands in a single string. |
 | addRepeatingEventID | [IntervalSeconds][RepeatsOr-1][UserID][CommandToRun] | as addRepeatingEvent, but with a given ID. You can later cancel it with cancelRepeatingEvent.<br/>e.g.:addRepeatingEventID 2 -1 123 Power0 Toggle |
 | cancelRepeatingEvent | [UserIDInteger] | Stops a given repeating event with a specified ID |
@@ -112,6 +117,7 @@ Do not add anything here, as it will overwritten with next rebuild.
 | lfs_test1 | [FileName] | Tests the LFS file reading feature. |
 | lfs_test2 | [FileName] | Tests the LFS file reading feature. |
 | lfs_test3 | [FileName] | Tests the LFS file reading feature. |
+| json_test | cmnd_json_test |  |
 | AB_Map | [int] | Sets margines for ADC button codes. For given N margins, there are N+1 possible ADC button values (one should be reserved for 'no button') |
 | Battery_Setup | [float][float][float][float][float] | measure battery based on ADC args minbatt and maxbatt in mv. optional V_divider(2), Vref(default 2400) and ADC bits(4096) and   <br/>e.g.:Battery_Setup 1500 3000 2 2400 4096 |
 | Battery_cycle | [int] | change cycle of measurement by default every 10 seconds<br/>e.g.:Battery_Setup 60 |
@@ -120,16 +126,16 @@ Do not add anything here, as it will overwritten with next rebuild.
 | SetupEnergyStats | [Enable1or0][SampleTime][SampleCount][JSonEnable] | Setup Energy Statistic Parameters: [enable<0|1>] [sample_time<10..900>] [sample_count<10..180>] [JsonEnable<0|1>]. JSONEnable is optional. |
 | ConsumptionThreshold | [FloatValue] | Setup value for automatic save of consumption data [1..100] |
 | VCPPublishThreshold | [VoltageDeltaVolts][CurrentDeltaAmpers][PowerDeltaWats][EnergyDeltaWh] | Sets the minimal change between previous reported value over MQTT and next reported value over MQTT. Very useful for BL0942, BL0937, etc. So, if you set, VCPPublishThreshold 0.5 0.001 0.5, it will only report voltage again if the delta from previous reported value is largen than 0.5V. Remember, that the device will also ALWAYS force-report values every N seconds (default 60) |
+| VCPPrecision | [VoltageDigits][CurrentDigitsAmpers][PowerDigitsWats][EnergyDigitsWh] | Sets the number of digits after decimal point for power metering publishes. Default is BL09XX_VCPPrecision 1 3 2 3. This works for OBK-style publishes. |
 | VCPPublishIntervals | [MinDelayBetweenPublishes][ForcedPublishInterval] | First argument is minimal allowed interval in second between Voltage/Current/Power/Energy publishes (even if there is a large change), second value is an interval in which V/C/P/E is always published, even if there is no change |
 | BP1658CJ_RGBCW | [HexColor] | Don't use it. It's for direct access of BP1658CJ driver. You don't need it because LED driver automatically calls it, so just use led_basecolor_rgb |
 | BP1658CJ_Map | [Ch0][Ch1][Ch2][Ch3][Ch4] | Maps the RGBCW values to given indices of BP1658CJ channels. This is because BP5758D channels order is not the same for some devices. Some devices are using RGBCW order and some are using GBRCW, etc, etc. Example usage: BP1658CJ_Map 0 1 2 3 4 |
 | BP1658CJ_Current | [MaxCurrentRGB][MaxCurrentCW] | Sets the maximum current limit for BP1658CJ driver. |
 | BP5758D_RGBCW | [HexColor] | Don't use it. It's for direct access of BP5758D driver. You don't need it because LED driver automatically calls it, so just use led_basecolor_rgb |
 | BP5758D_Map | [Ch0][Ch1][Ch2][Ch3][Ch4] | Maps the RGBCW values to given indices of BP5758D channels. This is because BP5758D channels order is not the same for some devices. Some devices are using RGBCW order and some are using GBRCW, etc, etc. Example usage: BP5758D_Map 0 1 2 3 4 |
-| BP5758D_Current | [MaxCurrent] | Sets the maximum current limit for BP5758D driver |
+| BP5758D_Current | [MaxCurrentRGB][MaxCurrentCW] | Sets the maximum current limit for BP5758D driver, first value is for rgb and second for cw |
 | BridgePulseLength | [FloatValue] | Setup value for bridge pulse len |
 | CHT_Calibrate |  | Calibrate the CHT Sensor as Tolerance is +/-2 degrees C.<br/>e.g.:SHT_Calibrate -4 10 |
-| DSEdge | [edgeCode] | DoorSensor driver configuration command. 0 means always wake up on rising edge, 1 means on falling, 2 means if state is high, use falling edge, if low, use rising. Default is 2 |
 | DSTime | [timeSeconds] | DoorSensor driver configuration command. Time to keep device running before next sleep after last door sensor change. In future we may add also an option to automatically sleep after MQTT confirms door state receival |
 | setButtonColor | [ButtonIndex][Color] | Sets the colour of custom scriptable HTTP page button |
 | setButtonCommand | [ButtonIndex][Command] | Sets the command of custom scriptable HTTP page button |
@@ -199,9 +205,11 @@ Do not add anything here, as it will overwritten with next rebuild.
 | TMGN_Brightness | [Brigthness0to7][bOn] | This allows you to change brightness and state of  TM1637/GN932/etc display |
 | TMGN_Map | [Map0][Map1, etc] | This allows you to remap characters order for TM1637/GN932/etc. My TM1637 module from Aliexpress has a strange characters order. |
 | TM1650_Test | CMD_TM1650_Test |  |
+| TMGN_Read | CMD_TMGN_Read |  |
+| TMGN_SetupButtons | CMD_TMGN_SetupButtons |  |
 | tuyaMcu_testSendTime |  | Sends a example date by TuyaMCU to clock/callendar MCU |
 | tuyaMcu_sendCurTime |  | Sends a current date by TuyaMCU to clock/callendar MCU. Time is taken from NTP driver, so NTP also should be already running. |
-| linkTuyaMCUOutputToChannel | [dpId][varType][channelID] | Used to map between TuyaMCU dpIDs and our internal channels. Mapping works both ways. DpIDs are per-device, you can get them by sniffing UART communication. Vartypes can also be sniffed from Tuya. VarTypes can be following: 0-raw, 1-bool, 2-value, 3-string, 4-enum, 5-bitmap |
+| linkTuyaMCUOutputToChannel | [dpId][varType][channelID][bDPCache-Optional] | Used to map between TuyaMCU dpIDs and our internal channels. Last argument is optional and 0 by default. You can set it to 1 for battery powered devices, so a variable is set with DPCache, for example a sampling interval for humidity/temperature sensor. Mapping works both ways. DpIDs are per-device, you can get them by sniffing UART communication. Vartypes can also be sniffed from Tuya. VarTypes can be following: 0-raw, 1-bool, 2-value, 3-string, 4-enum, 5-bitmap. Please see [Tuya Docs](https://developer.tuya.com/en/docs/iot/tuya-cloud-universal-serial-port-access-protocol?id=K9hhi0xxtn9cb) for info about TuyaMCU. You can also see our [TuyaMCU Analyzer Tool](https://www.elektroda.com/rtvforum/viewtopic.php?p=20528459#20528459) |
 | tuyaMcu_setDimmerRange | [Min][Max] | Set dimmer range used by TuyaMCU |
 | tuyaMcu_sendHeartbeat |  | Send heartbeat to TuyaMCU |
 | tuyaMcu_sendQueryState |  | Send query state command. No arguments needed. |
@@ -215,6 +223,7 @@ Do not add anything here, as it will overwritten with next rebuild.
 | uartSendHex | [HexString] | Sends raw data by UART, can be used to send TuyaMCU data, but you must write whole packet with checksum yourself |
 | uartSendASCII | [AsciiString] | Sends given string by UART. |
 | uartFakeHex | [HexString] | Spoofs a fake hex packet so it looks like TuyaMCU send that to us. Used for testing. |
+| uartInit | [BaudRate] | Manually starts UART1 port. Keep in mind that you don't need to do it for TuyaMCU and BL0942, those drivers do it automatically. |
 | UCS1912_Test |  |  |
 | lcd_clearAndGoto |  | Clears LCD and go to pos |
 | lcd_goto |  | Go to position on LCD |
@@ -243,6 +252,7 @@ Do not add anything here, as it will overwritten with next rebuild.
 | logfeature | [Index][1or0] | set log feature filter, as an index and a 1 or 0 |
 | logtype | [TypeStr] | logtype direct|thread|none - type of serial logging - thread (in a thread; default), direct (logged directly to serial), none (no UART logging) |
 | logdelay | [Value] | Value is a number of ms. This will add an artificial delay in each log call. Useful for debugging. This way you can see step by step what happens. |
+| logport | [Index] | Allows you to change log output port. On Beken, the UART1 is used for flashing and for TuyaMCU/BL0942, while UART2 is for log. Sometimes it might be easier for you to have log on UART1, so now you can just use this command like backlog uartInit 115200; logport 1 to enable logging on UART1.. |
 | publish | [Topic][Value] | Publishes data by MQTT. The final topic will be obk0696FB33/[Topic]/get. You can use argument expansion here, so $CH11 will change to value of the channel 11 |
 | publishInt | [Topic][Value] | Publishes data by MQTT. The final topic will be obk0696FB33/[Topic]/get. You can use argument expansion here, so $CH11 will change to value of the channel 11. This version of command publishes an integer, so you can also use math expressions like $CH10*10, etc. |
 | publishFloat | [Topic][Value] | Publishes data by MQTT. The final topic will be obk0696FB33/[Topic]/get. You can use argument expansion here, so $CH11 will change to value of the channel 11. This version of command publishes an float, so you can also use math expressions like $CH10*0.0, etc. |
@@ -252,6 +262,7 @@ Do not add anything here, as it will overwritten with next rebuild.
 | publishBenchmark |  |  |
 | mqtt_broadcastInterval | [ValueSeconds] | If broadcast self state every 60 seconds/minute is enabled in flags, this value allows you to change the delay, change this 60 seconds to any other value in seconds. This value is not saved, you must use autoexec.bat or short startup command to execute it on every reboot. |
 | mqtt_broadcastItemsPerSec | [PublishCountPerSecond] | If broadcast self state (this option in flags) is started, then gradually device info is published, with a speed of N publishes per second. Do not set too high value, it may overload LWIP MQTT library. This value is not saved, you must use autoexec.bat or short startup command to execute it on every reboot. |
+| TasTeleInterval | [SensorInterval][StateInterval] | This allows you to configure Tasmota TELE publish intervals, only if you have TELE flag enabled. First argument is interval for sensor publish (energy metering, etc), second is interval for State tele publish. |
 | showgpi | NULL | log stat of all GPIs |
 | setChannelType | [ChannelIndex][TypeString] | Sets a custom type for channel. Types are mostly used to determine how to display channel value on GUI |
 | showChannelValues |  | log channel values |

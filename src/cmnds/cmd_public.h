@@ -120,6 +120,10 @@ enum EventCode {
 
 	CMD_EVENT_NTP_STATE,
 
+	// custom buttons
+	CMD_EVENT_CUSTOM_DOWN,
+	CMD_EVENT_CUSTOM_UP,
+
 	// must be lower than 256
 	CMD_EVENT_MAX_TYPES
 };
@@ -152,6 +156,7 @@ enum LightMode {
 #define TOKENIZER_ALTERNATE_EXPAND_AT_START		4
 // force single argument mode
 #define TOKENIZER_FORCE_SINGLE_ARGUMENT_MODE	8
+#define TOKENIZER_ALLOW_ESCAPING_QUOTATIONS		16
 
 // cmd_tokenizer.c
 int Tokenizer_GetArgsCount();
@@ -214,6 +219,7 @@ bool LED_IsLedDriverChipRunning();
 bool LED_IsLEDRunning();
 void LED_SetEnableAll(int bEnable);
 int LED_GetEnableAll();
+void LED_SaveStateToFlashVarsNow();
 void LED_GetBaseColorString(char* s);
 void LED_SetBaseColorByIndex(int i, float f, bool bApply);
 int LED_GetMode();
@@ -223,6 +229,7 @@ float LED_GetGreen255();
 float LED_GetRed255();
 float LED_GetBlue255();
 void LED_RunQuickColorLerp(int deltaMS);
+void LED_RunOnEverySecond();
 OBK_Publish_Result sendFinalColor();
 OBK_Publish_Result sendColorChange();
 OBK_Publish_Result LED_SendEnableAllState();

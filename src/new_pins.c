@@ -33,7 +33,8 @@
 int BTN_SHORT_MS;
 int BTN_LONG_MS;
 int BTN_HOLD_REPEAT_MS;
-byte g_defaultDoorWakeEdge = 2;
+byte g_defaultWakeEdge = 2;
+int g_initialPinStates = 0;
 
 typedef enum {
 	BTN_PRESS_DOWN = 0,
@@ -141,7 +142,7 @@ void PINS_BeginDeepSleepWithPinWakeUp() {
 			// https://www.elektroda.pl/rtvforum/viewtopic.php?p=20543190#20543190
 			// forcing a certain edge for both states helps on some door sensors, somehow
 			// 0 means always wake up on rising edge, 1 means on falling, 2 means if state is high, use falling edge, if low, use rising
-			if (g_defaultDoorWakeEdge == 2) {
+			if (g_defaultWakeEdge == 2) {
 				value = HAL_PIN_ReadDigitalInput(i);
 				if (value) {
 					// on falling edge wake up
@@ -153,7 +154,7 @@ void PINS_BeginDeepSleepWithPinWakeUp() {
 				}
 			}
 			else {
-				falling = g_defaultDoorWakeEdge;
+				falling = g_defaultWakeEdge;
 			}
 			setGPIActive(i, 1, falling);
 		}
@@ -543,6 +544,7 @@ void CHANNEL_SetAll(int iVal, int iFlags) {
 		case IOR_LED:
 		case IOR_LED_n:
 		case IOR_BAT_Relay:
+		case IOR_BAT_Relay_n:
 		case IOR_Relay:
 		case IOR_Relay_n:
 			CHANNEL_Set(g_cfg.pins.channels[i], iVal, iFlags);
@@ -603,6 +605,7 @@ void CHANNEL_DoSpecialToggleAll() {
 }
 void PIN_SetPinRoleForPinIndex(int index, int role) {
 	bool bDHTChange = false;
+	bool bSampleInitialState = false;
 
 	if (index < 0 || index >= PLATFORM_GPIO_MAX) {
 		addLogAdv(LOG_ERROR, LOG_FEATURE_CFG, "PIN_SetPinRoleForPinIndex: Pin index %i out of range <0,%i).", index, PLATFORM_GPIO_MAX);
@@ -655,6 +658,7 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 		case IOR_LED:
 		case IOR_LED_n:
 		case IOR_BAT_Relay:
+		case IOR_BAT_Relay_n:
 		case IOR_Relay:
 		case IOR_Relay_n:
 		case IOR_LED_WIFI:
@@ -728,6 +732,8 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 
 			// init button after initializing pin role
 			NEW_button_init(bt, button_generic_get_gpio_value, 0);
+			// this is input - sample initial state down below
+			bSampleInitialState = true;
 		}
 		break;
 
@@ -747,6 +753,8 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 			HAL_PIN_Setup_Input_Pullup(index);
 			// otherwise we get a toggle on start
 			g_lastValidState[index] = PIN_ReadDigitalInputValue_WithInversionIncluded(index);
+			// this is input - sample initial state down below
+			bSampleInitialState = true;
 		}
 		break;
 		case IOR_DigitalInput_n:
@@ -758,6 +766,8 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 			setGPIActive(index, 1, falling);
 			// digital input
 			HAL_PIN_Setup_Input_Pullup(index);
+			// this is input - sample initial state down below
+			bSampleInitialState = true;
 		}
 		break;
 		case IOR_DoorSensorWithDeepSleep_pd:
@@ -766,6 +776,8 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 			setGPIActive(index, 1, falling);
 			// digital input
 			HAL_PIN_Setup_Input_Pulldown(index);
+			// this is input - sample initial state down below
+			bSampleInitialState = true;
 		}
 		break;
 		case IOR_DigitalInput_NoPup_n:
@@ -778,11 +790,14 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 			//setGPIActive(index, 1, falling);
 			// digital input
 			HAL_PIN_Setup_Input(index);
+			// this is input - sample initial state down below
+			bSampleInitialState = true;
 		}
 		break;
 		case IOR_LED:
 		case IOR_LED_n:
 		case IOR_BAT_Relay:
+		case IOR_BAT_Relay_n:
 		case IOR_Relay:
 		case IOR_Relay_n:
 		{
@@ -793,7 +808,7 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 			channelValue = g_channelValues[channelIndex];
 
 			HAL_PIN_Setup_Output(index);
-			if (role == IOR_LED_n || role == IOR_Relay_n) {
+			if (role == IOR_LED_n || role == IOR_Relay_n || role == IOR_BAT_Relay_n) {
 				HAL_PIN_SetOutputValue(index, !channelValue);
 			}
 			else {
@@ -863,6 +878,15 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 			break;
 		}
 	}
+	if (bSampleInitialState) {
+		if (PIN_ReadDigitalInputValue_WithInversionIncluded(index)) {
+			BIT_SET(g_initialPinStates, index);
+		}
+		else {
+			BIT_CLEAR(g_initialPinStates, index);
+		}
+	}
+
 	if (bDHTChange) {
 #if defined(PLATFORM_BEKEN) || defined(PLATFORM_BL602) || defined(PLATFORM_W600) || defined(WINDOWS)
 		// TODO: better place to call?
@@ -911,7 +935,7 @@ static void Channel_OnChanged(int ch, int prevValue, int iFlags) {
 			if (g_cfg.pins.roles[i] == IOR_Relay || g_cfg.pins.roles[i] == IOR_BAT_Relay || g_cfg.pins.roles[i] == IOR_LED) {
 				RAW_SetPinValue(i, bOn);
 			}
-			else if (g_cfg.pins.roles[i] == IOR_Relay_n || g_cfg.pins.roles[i] == IOR_LED_n) {
+			else if (g_cfg.pins.roles[i] == IOR_Relay_n || g_cfg.pins.roles[i] == IOR_LED_n || g_cfg.pins.roles[i] == IOR_BAT_Relay_n) {
 				RAW_SetPinValue(i, !bOn);
 			}
 			else if (g_cfg.pins.roles[i] == IOR_PWM) {
@@ -942,11 +966,11 @@ void CFG_ApplyChannelStartValues() {
 
 		iValue = g_cfg.startChannelValues[i];
 		if (iValue == -1) {
-			g_channelValues[i] = HAL_FlashVars_GetChannelValue(i);
+			g_channelValuesFloats[i] = g_channelValues[i] = HAL_FlashVars_GetChannelValue(i);
 			//addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "CFG_ApplyChannelStartValues: Channel %i is being set to REMEMBERED state %i", i, g_channelValues[i]);
 		}
 		else {
-			g_channelValues[i] = iValue;
+			g_channelValuesFloats[i] = g_channelValues[i] = iValue;
 			//addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "CFG_ApplyChannelStartValues: Channel %i is being set to constant state %i", i, g_channelValues[i]);
 		}
 	}
@@ -961,6 +985,7 @@ float CHANNEL_GetFinalValue(int channel) {
 	case ChType_Humidity_div10:
 	case ChType_Temperature_div10:
 	case ChType_Voltage_div10:
+	case ChType_Power_div10:
 		dVal = (float)iVal / 10;
 		break;
 	case ChType_Frequency_div100:
@@ -1288,7 +1313,7 @@ bool CHANNEL_ShouldBePublished(int ch) {
 		if (g_cfg.pins.channels[i] == ch) {
 			if (role == IOR_Relay || role == IOR_Relay_n
 				|| role == IOR_LED || role == IOR_LED_n
-				|| role == IOR_ADC || role == IOR_BAT_ADC || role == IOR_BAT_Relay
+				|| role == IOR_ADC || role == IOR_BAT_ADC 
 				|| role == IOR_CHT8305_DAT || role == IOR_SHT3X_DAT || role == IOR_SGP_DAT
 				|| role == IOR_DigitalInput || role == IOR_DigitalInput_n
 				|| role == IOR_DoorSensorWithDeepSleep || role == IOR_DoorSensorWithDeepSleep_NoPup
@@ -1329,6 +1354,7 @@ int CHANNEL_GetRoleForOutputChannel(int ch) {
 		if (g_cfg.pins.channels[i] == ch) {
 			switch (g_cfg.pins.roles[i]) {
 			case IOR_BAT_Relay:
+			case IOR_BAT_Relay_n:
 			case IOR_Relay:
 			case IOR_Relay_n:
 			case IOR_LED:
@@ -1765,8 +1791,10 @@ const char* g_channelTypeNames[] = {
 	"OffDimBright",
 	"LowMidHighHighest",
 	"OffLowMidHighHighest",
-	"error",
-	"error",
+	"Custom",
+	"Power_div10",
+	"ReadOnlyLowMidHigh",
+	"SmokePercent",
 	"error",
 	"error",
 	"error",
@@ -1893,7 +1921,6 @@ void PIN_get_Relay_PWM_Count(int* relayCount, int* pwmCount, int* dInputCount) {
 	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
 		int role = PIN_GetPinRoleForPinIndex(i);
 		switch (role) {
-		case IOR_BAT_Relay:
 		case IOR_Relay:
 		case IOR_Relay_n:
 		case IOR_LED:
@@ -1959,7 +1986,7 @@ int h_isChannelRelay(int tg_ch) {
 		if (tg_ch != ch)
 			continue;
 		role = PIN_GetPinRoleForPinIndex(i);
-		if (role == IOR_BAT_Relay || role == IOR_Relay || role == IOR_Relay_n || role == IOR_LED || role == IOR_LED_n) {
+		if (role == IOR_Relay || role == IOR_Relay_n || role == IOR_LED || role == IOR_LED_n) {
 			return true;
 		}
 		if ((role == IOR_BridgeForward) || (role == IOR_BridgeReverse))

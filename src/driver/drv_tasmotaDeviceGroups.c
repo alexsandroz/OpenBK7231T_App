@@ -10,6 +10,7 @@
 #include "lwip/sockets.h"
 #include "lwip/ip_addr.h"
 #include "lwip/inet.h"
+#include "../httpserver/new_http.h"
 
 static const char* dgr_group = "239.255.250.250";
 static int dgr_port = 4447;
@@ -17,6 +18,10 @@ static int dgr_retry_time_left = 5;
 static int g_inCmdProcessing = 0;
 static int g_dgr_socket_receive = -1;
 static int g_dgr_socket_send = -1;
+// statistics
+static int g_dgr_stat_sent = 0;
+static int g_dgr_stat_received = 0;
+
 static uint16_t g_dgr_send_seq = 0;
 
 const char *HAL_GetMyIPString();
@@ -108,6 +113,7 @@ void DGR_FlushSendQueue() {
 	p = dgr_pending;
 	while(p) {
 		if(p->length != 0) {
+			g_dgr_stat_sent++;
 			nbytes = sendto(
 				g_dgr_socket_send,
 			   (const char*) p->buffer,
@@ -209,6 +215,7 @@ void DRV_DGR_Send_Generic(byte *message, int len) {
 	// This is here only because sending UDP from MQTT callback crashes BK for me
 	// So instead, we are making a queue which is sent in quick tick
 	DGR_AddToSendQueue(message, len);
+	addLogAdv(LOG_EXTRADEBUG, LOG_FEATURE_DGR, "DGR adds to queue %i",len);
 #else
 
     // set up destination address
@@ -468,7 +475,7 @@ void DRV_DGR_processLightBrightness(byte brightness) {
 	
 }
 typedef struct dgrMmember_s {
-    struct sockaddr_in addr;
+	int ip;
 	uint16_t lastSeq;
 } dgrMember_t;
 
@@ -478,9 +485,12 @@ static int g_curDGRMembers = 0;
 static struct sockaddr_in addr;
 
 dgrMember_t *findMember() {
-	int i;
+	int i, ip;
+
+	ip = addr.sin_addr.s_addr;;
+
 	for(i = 0; i < g_curDGRMembers; i++) {
-		if(!memcmp(&g_dgrMembers[i].addr, &addr,sizeof(addr))) {
+		if(g_dgrMembers[i].ip == ip) {
 			return &g_dgrMembers[i];
 		}
 	}
@@ -488,7 +498,7 @@ dgrMember_t *findMember() {
 	if(i>=MAX_DGR_MEMBERS)
 		return 0;
 	g_curDGRMembers ++;
-	memcpy(&g_dgrMembers[i].addr,&addr,sizeof(addr));
+	g_dgrMembers[i].ip = ip;
 	g_dgrMembers[i].lastSeq = 0;
 	return &g_dgrMembers[i];
 }
@@ -498,22 +508,28 @@ int DGR_CheckSequence(uint16_t seq) {
 	
 	m = findMember();
 	
-	if(m == 0)
+	if (m == 0) {
+		addLogAdv(LOG_EXTRADEBUG, LOG_FEATURE_DGR, "DGR_CheckSequence: no member found");
 		return 1;
+	}
+	addLogAdv(LOG_EXTRADEBUG, LOG_FEATURE_DGR, "DGR_CheckSequence: argument %i, last %i",(int)seq, (int)m->lastSeq);
 	
 	// make it work past wrap at
 	if((seq > m->lastSeq) || (seq+10 > m->lastSeq+10)) {
 		if(seq != (m->lastSeq+1)){
-			addLogAdv(LOG_INFO, LOG_FEATURE_DGR,"Seq for %s skip %i->%i\n",inet_ntoa(m->addr.sin_addr), m->lastSeq, seq);
+			//addLogAdv(LOG_INFO, LOG_FEATURE_DGR,"Seq for %s skip %i->%i\n",inet_ntoa(m->ip), m->lastSeq, seq);
 		}
+		addLogAdv(LOG_EXTRADEBUG, LOG_FEATURE_DGR, "Seq ok");
 		m->lastSeq = seq;
 		return 0;
 	}
 	if(seq + 16 < m->lastSeq) {
+		addLogAdv(LOG_EXTRADEBUG, LOG_FEATURE_DGR, "Seq Hard reset");
 		// hard reset
 		m->lastSeq = seq;
 		return 0;
 	}
+	addLogAdv(LOG_EXTRADEBUG, LOG_FEATURE_DGR, "Seq failed");
 	return 1;
 }
 
@@ -608,6 +624,7 @@ void DRV_DGR_RunQuickTick() {
 			return;
 		}
 
+		g_dgr_stat_received++;
 		addLogAdv(LOG_EXTRADEBUG, LOG_FEATURE_DGR, "Received %i bytes from %s\n", nbytes, inet_ntoa(((struct sockaddr_in *)&addr)->sin_addr));
 
 		DGR_ProcessIncomingPacket(msgbuf, nbytes);
@@ -661,6 +678,9 @@ void DRV_DGR_Shutdown()
 	g_dgr_send_seq = 0;
 }
 
+void DRV_DGR_AppendInformationToHTTPIndexPage(http_request_t* request) {
+	hprintf255(request, "<h4>DGR received: %i, send: %i</h4>", g_dgr_stat_received, g_dgr_stat_sent);
+}
 // DGR_SendPower testSocket 1 1
 // DGR_SendPower stringGroupName integerChannelValues integerChannelsCount
 commandResult_t CMD_DGR_SendPower(const void *context, const char *cmd, const char *args, int flags) {
@@ -897,6 +917,7 @@ commandResult_t CMD_DGR_SendFixedColor(const void *context, const char *cmd, con
 void DRV_DGR_Init()
 {
 	memset(&g_dgrMembers[0],0,sizeof(g_dgrMembers));
+	g_curDGRMembers = 0;
 #if 0
 	DRV_DGR_StartThread();
 #else

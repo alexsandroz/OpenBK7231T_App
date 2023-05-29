@@ -272,6 +272,30 @@
     "driver": ""
   },
   {
+    "name": "Custom",
+    "title": "TODO",
+    "descr": "A custom channel type that is still send to HA.",
+    "enum": "ChType_Custom",
+    "file": "new_pins.h",
+    "driver": ""
+  },
+  {
+    "name": "Power_div10",
+    "title": "TODO",
+    "descr": "Just like power, but with one decimal place (but stored as integer, for TuyaMCU support)",
+    "enum": "ChType_Power_div10",
+    "file": "new_pins.h",
+    "driver": ""
+  },
+  {
+    "name": "ReadOnlyLowMidHigh",
+    "title": "TODO",
+    "descr": "Like LowMidHigh, but just read only",
+    "enum": "ChType_ReadOnlyLowMidHigh",
+    "file": "new_pins.h",
+    "driver": ""
+  },
+  {
     "name": "Max",
     "title": "TODO",
     "descr": "This is the current total number of available channel types.",

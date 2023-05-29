@@ -645,32 +645,33 @@ static int http_rest_get_pins(http_request_t* request) {
 	poststr(request, "{\"rolenames\":[");
 	for (i = 0; i < IOR_Total_Options; i++) {
 		if (i) {
-			hprintf255(request, ",\"%s\"", htmlPinRoleNames[i]);
+			hprintf255(request, ",");
 		}
-		else {
-			hprintf255(request, "\"%s\"", htmlPinRoleNames[i]);
-		}
+		hprintf255(request, "\"%s\"", htmlPinRoleNames[i]);
 	}
 	poststr(request, "],\"roles\":[");
 
 	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
 		if (i) {
-			hprintf255(request, ",%d", g_cfg.pins.roles[i]);
+			hprintf255(request, ",");
 		}
-		else {
-			hprintf255(request, "%d", g_cfg.pins.roles[i]);
-		}
+		hprintf255(request, "%d", g_cfg.pins.roles[i]);
 	}
 	// TODO: maybe we should cull futher channels that are not used?
 	// I support many channels because I plan to use 16x relays module with I2C MCP23017 driver
 	poststr(request, "],\"channels\":[");
 	for (i = 0; i < CHANNEL_MAX; i++) {
 		if (i) {
-			hprintf255(request, ",%d", g_cfg.pins.channels[i]);
+			hprintf255(request, ",");
 		}
-		else {
-			hprintf255(request, "%d", g_cfg.pins.channels[i]);
+		hprintf255(request, "%d", g_cfg.pins.channels[i]);
+	}
+	poststr(request, "],\"states\":[");
+	for (i = 0; i < CHANNEL_MAX; i++) {
+		if (i) {
+			hprintf255(request, ",");
 		}
+		hprintf255(request, "%d", CHANNEL_Get(g_cfg.pins.channels[i]));
 	}
 	poststr(request, "]}");
 	poststr(request, NULL);
@@ -819,7 +820,7 @@ static int http_rest_post_logconfig(http_request_t* request) {
 static int http_rest_get_info(http_request_t* request) {
 	char macstr[3 * 6 + 1];
 	http_setup(request, httpMimeTypeJson);
-	hprintf255(request, "{\"uptime_s\":%d,", Time_getUpTimeSeconds());
+	hprintf255(request, "{\"uptime_s\":%d,", g_secondsElapsed);
 	hprintf255(request, "\"build\":\"%s\",", g_build_str);
 	hprintf255(request, "\"ip\":\"%s\",", HAL_GetMyIPString());
 	hprintf255(request, "\"mac\":\"%s\",", HAL_GetMACStr(macstr));
@@ -828,6 +829,7 @@ static int http_rest_get_info(http_request_t* request) {
 	hprintf255(request, "\"mqtttopic\":\"%s\",", CFG_GetMQTTClientId());
 	hprintf255(request, "\"chipset\":\"%s\",", PLATFORM_MCU_NAME);
 	hprintf255(request, "\"webapp\":\"%s\",", CFG_GetWebappRoot());
+	hprintf255(request, "\"shortName\":\"%s\",", CFG_GetShortDeviceName());
 	
 	hprintf255(request, "\"startcmd\":\"%s\",", CFG_GetShortStartupCommand());
 #ifndef OBK_DISABLE_ALL_DRIVERS

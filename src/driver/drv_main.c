@@ -169,7 +169,7 @@ static driver_t g_drivers[] = {
 	//drvdetail:"title":"TODO",
 	//drvdetail:"descr":"Tasmota Device groups driver. See [forum example](https://www.elektroda.com/rtvforum/topic3925472.html) and TODO-video tutorial (will post on YT soon)",
 	//drvdetail:"requires":""}
-	{ "DGR",		DRV_DGR_Init,		DRV_DGR_RunEverySecond,		NULL, DRV_DGR_RunQuickTick, DRV_DGR_Shutdown, DRV_DGR_OnChannelChanged, false },
+	{ "DGR",		DRV_DGR_Init,		DRV_DGR_RunEverySecond,		DRV_DGR_AppendInformationToHTTPIndexPage, DRV_DGR_RunQuickTick, DRV_DGR_Shutdown, DRV_DGR_OnChannelChanged, false },
 #endif
 #if defined(PLATFORM_BEKEN) || defined(WINDOWS)
 	//drvdetail:{"name":"PWMToggler",
@@ -235,12 +235,17 @@ static driver_t g_drivers[] = {
 	//drvdetail:"title":"TODO",
 	//drvdetail:"descr":"Driver for 7-segment LED display with DIO/CLK interface",
 	//drvdetail:"requires":""}
-	{ "TM1637",	TM1637_Init,		NULL,		NULL, NULL, NULL, NULL, false },
+	{ "TM1637",	TM1637_Init,		NULL,		NULL,  TMGN_RunQuickTick,NULL, NULL, false },
 	//drvdetail:{"name":"GN6932",
 	//drvdetail:"title":"TODO",
 	//drvdetail:"descr":"Driver for 7-segment LED display with DIO/CLK/STB interface. See [this topic](https://www.elektroda.com/rtvforum/topic3971252.html) for details.",
 	//drvdetail:"requires":""}
-	{ "GN6932",	GN6932_Init,		NULL,		NULL, NULL, NULL, NULL, false },
+	{ "GN6932",	GN6932_Init,		NULL,		NULL, TMGN_RunQuickTick, NULL, NULL, false },
+	//drvdetail:{"name":"TM1638",
+	//drvdetail:"title":"TODO",
+	//drvdetail:"descr":"Driver for 7-segment LED display with DIO/CLK/STB interface. TM1638 is very similiar to GN6932 and TM1637. See [this topic](https://www.elektroda.com/rtvforum/viewtopic.php?p=20553628#20553628) for details.",
+	//drvdetail:"requires":""}
+	{ "TM1638",	TM1638_Init,		NULL,		NULL, TMGN_RunQuickTick,NULL,  NULL, false },
 	//drvdetail:{"name":"SHT3X",
 	//drvdetail:"title":"TODO",
 	//drvdetail:"descr":"Humidity/temperature sensor. See [SHT Sensor tutorial topic here](https://www.elektroda.com/rtvforum/topic3958369.html), also see [this sensor teardown](https://www.elektroda.com/rtvforum/topic3945688.html)",

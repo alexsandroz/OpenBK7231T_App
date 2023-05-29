@@ -43,8 +43,24 @@ typedef enum {
 	/// @brief CO2 sensor in ppm
 	CO2_SENSOR,
 	/// @brief TVOC sensor in ppb
-	TVOC_SENSOR
+	TVOC_SENSOR,
 
+	/// @brief 
+	VOLTAGE_SENSOR,
+	/// @brief 
+	CURRENT_SENSOR,
+	/// @brief 
+	//POWER_SINGLE_SENSOR,
+	/// @brief 
+	POWERFACTOR_SENSOR,
+	/// @brief 
+	FREQUENCY_SENSOR,
+	/// @brief 
+	CUSTOM_SENSOR,
+	/// @brief 
+	SMOKE_SENSOR,
+	/// @brief 
+	READONLYLOWMIDHIGH_SENSOR,
 } ENTITY_TYPE;
 
 //unique_id is defined in hass_populate_unique_id and is based on CFG_GetDeviceName() whose size is CGF_DEVICE_NAME_SIZE.
@@ -71,9 +87,13 @@ typedef struct HassDeviceInfo_s {
 
 void hass_print_unique_id(http_request_t* request, const char* fmt, ENTITY_TYPE type, int index);
 HassDeviceInfo* hass_init_relay_device_info(int index, ENTITY_TYPE type);
+HassDeviceInfo* hass_init_device_info(ENTITY_TYPE type, int index, char* payload_on, char* payload_off);
 HassDeviceInfo* hass_init_light_device_info(ENTITY_TYPE type);
 HassDeviceInfo* hass_init_power_sensor_device_info(int index);
-HassDeviceInfo* hass_init_binary_sensor_device_info(int index);
-HassDeviceInfo* hass_init_sensor_device_info(ENTITY_TYPE type, int channel);
+HassDeviceInfo* hass_init_light_singleColor_onChannels(int toggle, int dimmer, int brightness_scale);
+HassDeviceInfo* hass_init_binary_sensor_device_info(int index, bool bInverse);
+HassDeviceInfo* hass_init_sensor_device_info(ENTITY_TYPE type, int channel, int decPlaces, int decOffset);
 const char* hass_build_discovery_json(HassDeviceInfo* info);
-void hass_free_device_info(HassDeviceInfo* info);
+void hass_free_device_info(HassDeviceInfo* info); 
+char *hass_generate_multiplyAndRound_template(int decimalPlacesForRounding, int decimalPointOffset);
+

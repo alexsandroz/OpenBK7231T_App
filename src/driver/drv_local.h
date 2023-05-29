@@ -8,6 +8,7 @@ void DRV_DGR_RunQuickTick();
 void DRV_DGR_RunEverySecond();
 void DRV_DGR_Shutdown();
 void DRV_DGR_OnChannelChanged(int ch, int value);
+void DRV_DGR_AppendInformationToHTTPIndexPage(http_request_t* request);
 
 void DRV_DDP_Init();
 void DRV_DDP_RunFrame();
@@ -43,6 +44,7 @@ void TM1637_Init();
 
 void GN6932_Init();
 
+void TM1638_Init();
 
 bool DRV_IsRunning(const char* name);
 
@@ -87,6 +89,8 @@ void Shift_Init();
 void Shift_OnEverySecond();
 void Shift_OnChannelChanged(int ch, int value);
 
+void TMGN_RunQuickTick();
+
 void DRV_MAX72XX_Init();
 
 void WEMO_Init();
@@ -100,6 +104,8 @@ typedef struct softI2C_s {
 	short pin_data;
 	// I really have to place it here for a GN6932 driver, which is an SPI version of TM1637
 	short pin_stb;
+	// I must somehow be able to tell which proto we have?
+	//short protocolType;
 } softI2C_t;
 
 void Soft_I2C_SetLow(uint8_t pin);

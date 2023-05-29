@@ -542,6 +542,13 @@ int http_fn_index(http_request_t* request) {
 			hprintf255(request, "ReactivePower %iVAr (ch %s)", iValue, CHANNEL_GetLabel(i));
 			poststr(request, "</td></tr>");
 		}
+		else if (channelType == ChType_Power_div10) {
+			iValue = CHANNEL_Get(i);
+
+			poststr(request, "<tr><td>");
+			hprintf255(request, "Power %.2fW (ch %s)", (iValue*0.1f), CHANNEL_GetLabel(i));
+			poststr(request, "</td></tr>");
+		}
 		else if (channelType == ChType_Power) {
 			iValue = CHANNEL_Get(i);
 
@@ -554,7 +561,7 @@ int http_fn_index(http_request_t* request) {
 			fValue = iValue * 0.001f;
 
 			poststr(request, "<tr><td>");
-			hprintf255(request, "PowerFactor %.2f (ch %i)", fValue, i);
+			hprintf255(request, "PowerFactor %.4f (ch %i)", fValue, i);
 			poststr(request, "</td></tr>");
 		}
 		else if (channelType == ChType_Current_div100) {
@@ -562,7 +569,7 @@ int http_fn_index(http_request_t* request) {
 			fValue = iValue * 0.01f;
 
 			poststr(request, "<tr><td>");
-			hprintf255(request, "Current %.2fA (ch %s)", fValue, CHANNEL_GetLabel(i));
+			hprintf255(request, "Current %.3fA (ch %s)", fValue, CHANNEL_GetLabel(i));
 			poststr(request, "</td></tr>");
 		}
 		else if (channelType == ChType_Current_div1000) {
@@ -570,7 +577,7 @@ int http_fn_index(http_request_t* request) {
 			fValue = iValue * 0.001f;
 
 			poststr(request, "<tr><td>");
-			hprintf255(request, "Current %.2fA (ch %s)", fValue, CHANNEL_GetLabel(i));
+			hprintf255(request, "Current %.4fA (ch %s)", fValue, CHANNEL_GetLabel(i));
 			poststr(request, "</td></tr>");
 		}
 		else if (channelType == ChType_BatteryLevelPercent) {
@@ -827,6 +834,36 @@ int http_fn_index(http_request_t* request) {
 	{
 		hprintf255(request, "<h5>Wifi RSSI: %s (%idBm)</h5>", str_rssi[wifi_rssi_scale(HAL_GetWifiStrength())], HAL_GetWifiStrength());
 	}
+#if PLATFORM_BEKEN
+	/*
+typedef enum { 
+	RESET_SOURCE_POWERON = 0,
+	RESET_SOURCE_REBOOT = 1,
+	RESET_SOURCE_WATCHDOG = 2,
+
+	RESET_SOURCE_DEEPPS_GPIO = 3,
+	RESET_SOURCE_DEEPPS_RTC = 4,
+
+	RESET_SOURCE_CRASH_XAT0 = 5,
+	RESET_SOURCE_CRASH_UNDEFINED = 6,
+	RESET_SOURCE_CRASH_PREFETCH_ABORT = 7,
+	RESET_SOURCE_CRASH_DATA_ABORT = 8,
+	RESET_SOURCE_CRASH_UNUSED = 9,
+
+} RESET_SOURCE_STATUS;
+*/
+	{
+		const char *s = "Unk";
+		i = bk_misc_get_start_type();
+		if (i == 0)
+			s = "Pwr";
+		else if (i == 1)
+			s = "Rbt";
+		else if (i == 2)
+			s = "Wdt";
+		hprintf255(request, "<h5>Reboot reason: %i - %s</h5>", i, s);
+	}
+#endif
 	if (CFG_GetMQTTHost()[0] == 0) {
 		hprintf255(request, "<h5>MQTT State: not configured<br>");
 	}
@@ -1210,6 +1247,9 @@ int http_fn_cfg_wifi(http_request_t* request) {
 	poststr_h2(request, "Use this to connect to your WiFi");
 	add_label_text_field(request, "SSID", "ssid", CFG_GetWiFiSSID(), "<form action=\"/cfg_wifi_set\">");
 	add_label_password_field(request, "Password", "pass", CFG_GetWiFiPass(), "<br>");
+	poststr_h2(request, "Alternate WiFi (used when first one is not responding)");
+	add_label_text_field(request, "SSID2", "ssid2", CFG_GetWiFiSSID2(), "");
+	add_label_password_field(request, "Password2", "pass2", CFG_GetWiFiPass2(), "<br>");
 	poststr(request, "<br><br>\
 <input type=\"submit\" value=\"Submit\" onclick=\"return confirm('Are you sure? Please check SSID and pass twice?')\">\
 </form>");
@@ -1256,29 +1296,41 @@ int http_fn_cfg_name(http_request_t* request) {
 
 int http_fn_cfg_wifi_set(http_request_t* request) {
 	char tmpA[128];
+	int bChanged;
+
 	addLogAdv(LOG_INFO, LOG_FEATURE_HTTP, "HTTP_ProcessPacket: generating cfg_wifi_set \r\n");
+	bChanged = 0;
 
 	http_setup(request, httpMimeTypeHTML);
 	http_html_start(request, "Saving Wifi");
 	if (http_getArg(request->url, "open", tmpA, sizeof(tmpA))) {
-		CFG_SetWiFiSSID("");
-		CFG_SetWiFiPass("");
+		bChanged |= CFG_SetWiFiSSID("");
+		bChanged |= CFG_SetWiFiPass("");
 		poststr(request, "WiFi mode set: open access point.");
 	}
 	else {
 		if (http_getArg(request->url, "ssid", tmpA, sizeof(tmpA))) {
-			CFG_SetWiFiSSID(tmpA);
+			bChanged |= CFG_SetWiFiSSID(tmpA);
 		}
 		if (http_getArg(request->url, "pass", tmpA, sizeof(tmpA))) {
-			CFG_SetWiFiPass(tmpA);
+			bChanged |= CFG_SetWiFiPass(tmpA);
 		}
 		poststr(request, "WiFi mode set: connect to WLAN.");
 	}
+	if (http_getArg(request->url, "ssid2", tmpA, sizeof(tmpA))) {
+		bChanged |= CFG_SetWiFiSSID2(tmpA);
+	}
+	if (http_getArg(request->url, "pass2", tmpA, sizeof(tmpA))) {
+		bChanged |= CFG_SetWiFiPass2(tmpA);
+	}
 	CFG_Save_SetupTimer();
-
-	poststr(request, "Please wait for module to reset...");
-	RESET_ScheduleModuleReset(3);
-
+	if (bChanged==0) {
+		poststr(request, "No changes detected.");
+	}
+	else {
+		poststr(request, "Please wait for module to reset...");
+		RESET_ScheduleModuleReset(3);
+	}
 	poststr(request, "<br><a href=\"cfg_wifi\">Return to WiFi settings</a><br>");
 	poststr(request, htmlFooterReturnToCfgLink);
 	http_html_end(request);
@@ -1357,97 +1409,97 @@ int http_fn_cfg_mac(http_request_t* request) {
 	poststr(request, NULL);
 	return 0;
 }
-
-int http_fn_flash_read_tool(http_request_t* request) {
-	int len = 16;
-	int ofs = 1970176;
-	int res;
-	int rem;
-	int now;
-	int nowOfs;
-	int hex;
-	int i;
-	char tmpA[128];
-	char tmpB[64];
-
-	http_setup(request, httpMimeTypeHTML);
-	http_html_start(request, "Flash read");
-	poststr_h4(request, "Flash Read Tool");
-	if (http_getArg(request->url, "hex", tmpA, sizeof(tmpA))) {
-		hex = atoi(tmpA);
-	}
-	else {
-		hex = 0;
-	}
-
-	if (http_getArg(request->url, "offset", tmpA, sizeof(tmpA)) &&
-		http_getArg(request->url, "len", tmpB, sizeof(tmpB))) {
-		unsigned char buffer[128];
-		len = atoi(tmpB);
-		ofs = atoi(tmpA);
-		hprintf255(request, "Memory at %i with len %i reads: ", ofs, len);
-		poststr(request, "<br>");
-
-		///res = bekken_hal_flash_read (ofs, buffer,len);
-		//sprintf(tmpA,"Result %i",res);
-	//	strcat(outbuf,tmpA);
-	///	strcat(outbuf,"<br>");
-
-		nowOfs = ofs;
-		rem = len;
-		while (1) {
-			if (rem > sizeof(buffer)) {
-				now = sizeof(buffer);
-			}
-			else {
-				now = rem;
-			}
-#if PLATFORM_XR809
-			//uint32_t flash_read(uint32_t flash, uint32_t addr,void *buf, uint32_t size)
-#define FLASH_INDEX_XR809 0
-			res = flash_read(FLASH_INDEX_XR809, nowOfs, buffer, now);
-#elif PLATFORM_BL602
-
-#elif PLATFORM_W600 || PLATFORM_W800
-
-#else
-			res = bekken_hal_flash_read(nowOfs, buffer, now);
-#endif
-			for (i = 0; i < now; i++) {
-				unsigned char val = buffer[i];
-				if (!hex && isprint(val)) {
-					hprintf255(request, "'%c' ", val);
-				}
-				else {
-					hprintf255(request, "%02X ", val);
-				}
-			}
-			rem -= now;
-			nowOfs += now;
-			if (rem <= 0) {
-				break;
-			}
-		}
-
-		poststr(request, "<br>");
-	}
-	poststr(request, "<form action=\"/flash_read_tool\">");
-
-	poststr(request, "<input type=\"checkbox\" id=\"hex\" name=\"hex\" value=\"1\"");
-	if (hex) {
-		poststr(request, " checked");
-	}
-	poststr(request, "><label for=\"hex\">Show all hex?</label><br>");
-
-	add_label_numeric_field(request, "Offset", "offset", ofs, "");
-	add_label_numeric_field(request, "Length", "len", len, "<br>");
-	poststr(request, SUBMIT_AND_END_FORM);
-
-	poststr(request, htmlFooterReturnToCfgLink);
-	http_html_end(request);
-	poststr(request, NULL);
-	return 0;
-}
+//
+//int http_fn_flash_read_tool(http_request_t* request) {
+//	int len = 16;
+//	int ofs = 1970176;
+//	int res;
+//	int rem;
+//	int now;
+//	int nowOfs;
+//	int hex;
+//	int i;
+//	char tmpA[128];
+//	char tmpB[64];
+//
+//	http_setup(request, httpMimeTypeHTML);
+//	http_html_start(request, "Flash read");
+//	poststr_h4(request, "Flash Read Tool");
+//	if (http_getArg(request->url, "hex", tmpA, sizeof(tmpA))) {
+//		hex = atoi(tmpA);
+//	}
+//	else {
+//		hex = 0;
+//	}
+//
+//	if (http_getArg(request->url, "offset", tmpA, sizeof(tmpA)) &&
+//		http_getArg(request->url, "len", tmpB, sizeof(tmpB))) {
+//		unsigned char buffer[128];
+//		len = atoi(tmpB);
+//		ofs = atoi(tmpA);
+//		hprintf255(request, "Memory at %i with len %i reads: ", ofs, len);
+//		poststr(request, "<br>");
+//
+//		///res = bekken_hal_flash_read (ofs, buffer,len);
+//		//sprintf(tmpA,"Result %i",res);
+//	//	strcat(outbuf,tmpA);
+//	///	strcat(outbuf,"<br>");
+//
+//		nowOfs = ofs;
+//		rem = len;
+//		while (1) {
+//			if (rem > sizeof(buffer)) {
+//				now = sizeof(buffer);
+//			}
+//			else {
+//				now = rem;
+//			}
+//#if PLATFORM_XR809
+//			//uint32_t flash_read(uint32_t flash, uint32_t addr,void *buf, uint32_t size)
+//#define FLASH_INDEX_XR809 0
+//			res = flash_read(FLASH_INDEX_XR809, nowOfs, buffer, now);
+//#elif PLATFORM_BL602
+//
+//#elif PLATFORM_W600 || PLATFORM_W800
+//
+//#else
+//			res = bekken_hal_flash_read(nowOfs, buffer, now);
+//#endif
+//			for (i = 0; i < now; i++) {
+//				unsigned char val = buffer[i];
+//				if (!hex && isprint(val)) {
+//					hprintf255(request, "'%c' ", val);
+//				}
+//				else {
+//					hprintf255(request, "%02X ", val);
+//				}
+//			}
+//			rem -= now;
+//			nowOfs += now;
+//			if (rem <= 0) {
+//				break;
+//			}
+//		}
+//
+//		poststr(request, "<br>");
+//	}
+//	poststr(request, "<form action=\"/flash_read_tool\">");
+//
+//	poststr(request, "<input type=\"checkbox\" id=\"hex\" name=\"hex\" value=\"1\"");
+//	if (hex) {
+//		poststr(request, " checked");
+//	}
+//	poststr(request, "><label for=\"hex\">Show all hex?</label><br>");
+//
+//	add_label_numeric_field(request, "Offset", "offset", ofs, "");
+//	add_label_numeric_field(request, "Length", "len", len, "<br>");
+//	poststr(request, SUBMIT_AND_END_FORM);
+//
+//	poststr(request, htmlFooterReturnToCfgLink);
+//	http_html_end(request);
+//	poststr(request, NULL);
+//	return 0;
+//}
 const char* CMD_GetResultString(commandResult_t r) {
 	if (r == CMD_RES_OK)
 		return "OK";
@@ -1542,49 +1594,6 @@ int http_fn_startup_command(http_request_t* request) {
 	poststr(request, NULL);
 	return 0;
 }
-int http_fn_uart_tool(http_request_t* request) {
-	char tmpA[256];
-	int resultLen = 0;
-	http_setup(request, httpMimeTypeHTML);
-	http_html_start(request, "UART tool");
-	poststr_h4(request, "UART Tool");
-
-	if (http_getArg(request->url, "data", tmpA, sizeof(tmpA))) {
-#ifdef ENABLE_DRIVER_TUYAMCU
-		byte results[128];
-
-		hprintf255(request, "<h3>Sent %s!</h3>", tmpA);
-		if (0) {
-			TuyaMCU_Send((byte*)tmpA, strlen(tmpA));
-			//	bk_send_string(0,tmpA);
-		}
-		else {
-			byte b;
-			const char* p;
-
-			p = tmpA;
-			while (*p) {
-				b = hexbyte(p);
-				results[resultLen] = b;
-				resultLen++;
-				p += 2;
-			}
-			TuyaMCU_Send(results, resultLen);
-		}
-#endif
-	}
-	else {
-		strcpy(tmpA, "Hello UART world");
-	}
-
-	add_label_text_field(request, "Data", "data", tmpA, "<form action=\"/uart_tool\">");
-	poststr(request, SUBMIT_AND_END_FORM);
-
-	poststr(request, htmlFooterReturnToCfgLink);
-	http_html_end(request);
-	poststr(request, NULL);
-	return 0;
-}
 
 void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 	int i;
@@ -1597,6 +1606,14 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 	bool measuringBattery = false;
 	struct cJSON_Hooks hooks;
 	bool discoveryQueued = false;
+	int type;
+	// warning - this is 32 bit
+	int flagsChannelPublished;
+	int ch;
+	int dimmer, toggle, brightness_scale;
+
+	// no channels published yet
+	flagsChannelPublished = 0;
 
 	if (topic == 0 || *topic == 0) {
 		topic = "homeassistant";
@@ -1615,9 +1632,64 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 	hooks.free_fn = os_free;
 	cJSON_InitHooks(&hooks);
 
-	if (relayCount > 0) {
+
+#if ENABLE_ADVANCED_CHANNELTYPES_DISCOVERY
+	// try to pair toggles with dimmers. This is needed only for TuyaMCU, 
+	// where custom channel types are used. This is NOT used for simple
+	// CW/RGB/RGBCW/etc lights.
+	while (true) {
+		// find first dimmer
+		dimmer = -1;
 		for (i = 0; i < CHANNEL_MAX; i++) {
-			if (h_isChannelRelay(i)) {
+			type = g_cfg.pins.channelTypes[i];
+			if (BIT_CHECK(flagsChannelPublished, i)) {
+				continue;
+			}
+			if (type == ChType_Dimmer) {
+				brightness_scale = 100;
+				dimmer = i;
+				break;
+			}
+			if (type == ChType_Dimmer1000) {
+				brightness_scale = 1000;
+				dimmer = i;
+				break;
+			}
+			if (type == ChType_Dimmer256) {
+				brightness_scale = 256;
+				dimmer = i;
+				break;
+			}
+		}
+		// find first togle
+		toggle = -1;
+		for (i = 0; i < CHANNEL_MAX; i++) {
+			type = g_cfg.pins.channelTypes[i];
+			if (BIT_CHECK(flagsChannelPublished, i)) {
+				continue;
+			}
+			if (type == ChType_Toggle) {
+				toggle = i;
+				break;
+			}
+		}
+		// if nothing found, stop
+		if (toggle == -1 || dimmer == -1) {
+			break;
+		}
+
+		BIT_SET(flagsChannelPublished, toggle);
+		BIT_SET(flagsChannelPublished, dimmer);
+		dev_info = hass_init_light_singleColor_onChannels(toggle, dimmer, brightness_scale);
+		MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+		hass_free_device_info(dev_info);
+	}
+#endif
+	//if (relayCount > 0) {
+		for (i = 0; i < CHANNEL_MAX; i++) {
+			if (h_isChannelRelay(i) || g_cfg.pins.channelTypes[i] == ChType_Toggle) {
+				// TODO: flags are 32 bit and there are 64 max channels
+				BIT_SET(flagsChannelPublished, i);
 				if (CFG_HasFlag(OBK_FLAG_MQTT_HASS_ADD_RELAYS_AS_LIGHTS)) {
 					dev_info = hass_init_relay_device_info(i, LIGHT_ON_OFF);
 				}
@@ -1630,12 +1702,14 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 				discoveryQueued = true;
 			}
 		}
-	}
+	//}
 
 	if (dInputCount > 0) {
 		for (i = 0; i < CHANNEL_MAX; i++) {
 			if (h_isChannelDigitalInput(i)) {
-				dev_info = hass_init_binary_sensor_device_info(i);
+				// TODO: flags are 32 bit and there are 64 max channels
+				BIT_SET(flagsChannelPublished, i);
+				dev_info = hass_init_binary_sensor_device_info(i, false);
 				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
 				hass_free_device_info(dev_info);
 				dev_info = NULL;
@@ -1691,11 +1765,11 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 #endif
 
 	if (measuringBattery == true) {
-		dev_info = hass_init_sensor_device_info(BATTERY_SENSOR, 0);
+		dev_info = hass_init_sensor_device_info(BATTERY_SENSOR, 0, -1, -1);
 		MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
 		hass_free_device_info(dev_info);
 
-		dev_info = hass_init_sensor_device_info(BATTERY_VOLTAGE_SENSOR, 0);
+		dev_info = hass_init_sensor_device_info(BATTERY_VOLTAGE_SENSOR, 0, -1, -1);
 		MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
 		hass_free_device_info(dev_info);
 
@@ -1704,29 +1778,196 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 
 	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
 		if (IS_PIN_DHT_ROLE(g_cfg.pins.roles[i]) || IS_PIN_TEMP_HUM_SENSOR_ROLE(g_cfg.pins.roles[i])) {
-			dev_info = hass_init_sensor_device_info(TEMPERATURE_SENSOR, PIN_GetPinChannelForPinIndex(i));
+			ch = PIN_GetPinChannelForPinIndex(i);
+			// TODO: flags are 32 bit and there are 64 max channels
+			BIT_SET(flagsChannelPublished, ch);
+			dev_info = hass_init_sensor_device_info(TEMPERATURE_SENSOR, ch, 2, 1);
 			MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
 			hass_free_device_info(dev_info);
 
-			dev_info = hass_init_sensor_device_info(HUMIDITY_SENSOR, PIN_GetPinChannel2ForPinIndex(i));
+			ch = PIN_GetPinChannel2ForPinIndex(i);
+			// TODO: flags are 32 bit and there are 64 max channels
+			BIT_SET(flagsChannelPublished, ch);
+			dev_info = hass_init_sensor_device_info(HUMIDITY_SENSOR, ch, -1, -1);
 			MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
 			hass_free_device_info(dev_info);
 
 			discoveryQueued = true;
 		}
 		else if (IS_PIN_AIR_SENSOR_ROLE(g_cfg.pins.roles[i])) {
-			dev_info = hass_init_sensor_device_info(CO2_SENSOR, PIN_GetPinChannelForPinIndex(i));
+			ch = PIN_GetPinChannelForPinIndex(i);
+			// TODO: flags are 32 bit and there are 64 max channels
+			BIT_SET(flagsChannelPublished, ch);
+			dev_info = hass_init_sensor_device_info(CO2_SENSOR, ch, -1, -1);
 			MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
 			hass_free_device_info(dev_info);
 
-			dev_info = hass_init_sensor_device_info(TVOC_SENSOR, PIN_GetPinChannel2ForPinIndex(i));
+			ch = PIN_GetPinChannel2ForPinIndex(i);
+			// TODO: flags are 32 bit and there are 64 max channels
+			BIT_SET(flagsChannelPublished, ch);
+			dev_info = hass_init_sensor_device_info(TVOC_SENSOR, ch, -1, -1);
 			MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
 			hass_free_device_info(dev_info);
 
 			discoveryQueued = true;
 		}
 	}
+#if ENABLE_ADVANCED_CHANNELTYPES_DISCOVERY
+	for (i = 0; i < CHANNEL_MAX; i++) {
+		type = g_cfg.pins.channelTypes[i];
+		// TODO: flags are 32 bit and there are 64 max channels
+		if (BIT_CHECK(flagsChannelPublished, i)) {
+			continue;
+		}
+		switch (type)
+		{
+			case ChType_OpenClosed:
+			{
+				dev_info = hass_init_binary_sensor_device_info(i, false);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
 
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_OpenClosed_Inv:
+			{
+				dev_info = hass_init_binary_sensor_device_info(i, true);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_Voltage_div10:
+			{
+				dev_info = hass_init_sensor_device_info(VOLTAGE_SENSOR, i, 2, 1);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break; 
+			case ChType_ReadOnlyLowMidHigh:
+			{
+				dev_info = hass_init_sensor_device_info(READONLYLOWMIDHIGH_SENSOR, i, -1, -1);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_SmokePercent:
+			{
+				dev_info = hass_init_sensor_device_info(SMOKE_SENSOR, i, -1, -1);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_ReadOnly:
+			{
+				dev_info = hass_init_sensor_device_info(CUSTOM_SENSOR, i, -1, -1);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_Temperature:
+			{
+				dev_info = hass_init_sensor_device_info(TEMPERATURE_SENSOR, i, -1, -1);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_Temperature_div10:
+			{
+				dev_info = hass_init_sensor_device_info(TEMPERATURE_SENSOR, i, 2, 1);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_Humidity:
+			{
+				dev_info = hass_init_sensor_device_info(HUMIDITY_SENSOR, i, -1, -1);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_Humidity_div10:
+			{
+				dev_info = hass_init_sensor_device_info(HUMIDITY_SENSOR, i, 2, 1);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_Current_div100:
+			{
+				dev_info = hass_init_sensor_device_info(CURRENT_SENSOR, i, 3, 2);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_Current_div1000:
+			{
+				dev_info = hass_init_sensor_device_info(CURRENT_SENSOR, i, 3, 3);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_Power:
+			{
+				dev_info = hass_init_sensor_device_info(POWER_SENSOR, i, -1, -1);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_Power_div10:
+			{
+				dev_info = hass_init_sensor_device_info(POWER_SENSOR, i, 2, 1);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_PowerFactor_div1000:
+			{
+				dev_info = hass_init_sensor_device_info(POWERFACTOR_SENSOR, i, 4, 3);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+			case ChType_Frequency_div100:
+			{
+				dev_info = hass_init_sensor_device_info(FREQUENCY_SENSOR, i, 3, 2);
+				MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+				hass_free_device_info(dev_info);
+
+				discoveryQueued = true;
+			}
+			break;
+		}
+	}
+#endif
 	if (discoveryQueued) {
 		MQTT_InvokeCommandAtEnd(PublishChannels);
 	}
@@ -2019,8 +2260,7 @@ int http_fn_cfg(http_request_t* request) {
 	postFormAction(request, "ha_cfg", "Home Assistant Configuration");
 	postFormAction(request, "ota", "OTA (update software by WiFi)");
 	postFormAction(request, "cmd_tool", "Execute custom command");
-	postFormAction(request, "flash_read_tool", "Flash Read Tool");
-	postFormAction(request, "uart_tool", "UART Tool");
+	//postFormAction(request, "flash_read_tool", "Flash Read Tool");
 	postFormAction(request, "startup_command", "Change startup command text");
 
 #if 0
@@ -2237,7 +2477,7 @@ const char* g_obk_flagNames[] = {
 	"[WiFi] Quick connect to WiFi on reboot (TODO: check if it works for you and report on github)",
 	"[Power] Set power and current to zero if all relays are open",
 	"[MQTT] [Debug] Publish all channels (don't enable it, it will be publish all 64 possible channels on connect)",
-	"error",
+	"[MQTT] Use kWh unit for energy consumption (total, last hour, today) instead of Wh",
 	"error",
 	"error",
 	"error",

@@ -49,7 +49,9 @@ https://developer.tuya.com/en/docs/iot/tuyacloudlowpoweruniversalserialaccesspro
 
 void TuyaMCU_RunFrame();
 
-
+static byte g_tuyaMCUConfirmationsToSend_0x08 = 0;
+static byte g_tuyaMCUConfirmationsToSend_0x05 = 0;
+static byte g_resetWiFiEvents = 0;
 
 
 
@@ -133,11 +135,13 @@ typedef struct rtcc_s {
 
 typedef struct tuyaMCUMapping_s {
 	// internal Tuya variable index
-	int fnId;
+	byte fnId;
 	// target channel
-	int channel;
+	byte channel;
 	// data point type (one of the DP_TYPE_xxx defines)
-	int dpType;
+	byte dpType;
+	// true if it's supposed to be sent in dp cache
+	byte bDPCache;
 	// store last channel value to avoid sending it again
 	int prevValue;
 	// TODO
@@ -155,14 +159,17 @@ tuyaMCUMapping_t* g_tuyaMappings = 0;
  * Use tuyaMCU_setDimmerrange command to set range used by TuyaMCU.
  */
  // minimum dimmer value as reported by TuyaMCU dimmer
-int g_dimmerRangeMin = 0;
+static int g_dimmerRangeMin = 0;
 // maximum dimmer value as reported by TuyaMCU dimmer
-int g_dimmerRangeMax = 100;
+static int g_dimmerRangeMax = 100;
 
 // serial baud rate used to communicate with the TuyaMCU
 // common baud rates are 9600 bit/s and 115200 bit/s
-int g_baudRate = 9600;
+static int g_baudRate = 9600;
 
+// global mcu time
+static int g_tuyaNextRequestDelay;
+static bool g_sensorMode = 0;
 
 static bool heartbeat_valid = false;
 static int heartbeat_timer = 0;
@@ -181,6 +188,18 @@ static int g_sendQueryStatePackets = 0;
 // wifistate to send when not online
 // See: https://imgur.com/a/mEfhfiA
 static byte g_defaultTuyaMCUWiFiState = 0x00;
+
+
+// battery powered device state
+enum TuyaMCUV0State {
+	TM0_STATE_AWAITING_INFO,
+	TM0_STATE_AWAITING_WIFI,
+	TM0_STATE_AWAITING_MQTT,
+	TM0_STATE_AWAITING_STATES,
+};
+static byte g_tuyaBatteryPoweredState = 0;
+static byte g_hello[] = { 0x55, 0xAA, 0x00, 0x01, 0x00, 0x00, 0x00 };
+static byte g_request_state[] = { 0x55, 0xAA, 0x00, 0x02, 0x00, 0x01, 0x04, 0x06 };
 
 tuyaMCUMapping_t* TuyaMCU_FindDefForID(int fnId) {
 	tuyaMCUMapping_t* cur;
@@ -206,7 +225,7 @@ tuyaMCUMapping_t* TuyaMCU_FindDefForChannel(int channel) {
 	return 0;
 }
 
-void TuyaMCU_MapIDToChannel(int fnId, int dpType, int channel) {
+void TuyaMCU_MapIDToChannel(int fnId, int dpType, int channel, int bDPCache) {
 	tuyaMCUMapping_t* cur;
 
 	cur = TuyaMCU_FindDefForID(fnId);
@@ -215,6 +234,7 @@ void TuyaMCU_MapIDToChannel(int fnId, int dpType, int channel) {
 		cur = (tuyaMCUMapping_t*)malloc(sizeof(tuyaMCUMapping_t));
 		cur->fnId = fnId;
 		cur->dpType = dpType;
+		cur->bDPCache = bDPCache;
 		cur->prevValue = 0;
 		cur->next = g_tuyaMappings;
 		g_tuyaMappings = cur;
@@ -245,8 +265,8 @@ int UART_TryToGetNextTuyaPacket(byte* out, int maxSize) {
 	}
 	// skip garbage data (should not happen)
 	while (cs > 0) {
-		a = UART_GetNextByte(0);
-		b = UART_GetNextByte(1);
+		a = UART_GetByte(0);
+		b = UART_GetByte(1);
 		if (a != 0x55 || b != 0xAA) {
 			UART_ConsumeBytes(1);
 			if (c_garbage_consumed + 2 < sizeof(printfSkipDebug)) {
@@ -267,15 +287,15 @@ int UART_TryToGetNextTuyaPacket(byte* out, int maxSize) {
 	if (cs < MIN_TUYAMCU_PACKET_SIZE) {
 		return 0;
 	}
-	a = UART_GetNextByte(0);
-	b = UART_GetNextByte(1);
+	a = UART_GetByte(0);
+	b = UART_GetByte(1);
 	if (a != 0x55 || b != 0xAA) {
 		return 0;
 	}
-	version = UART_GetNextByte(2);
-	command = UART_GetNextByte(3);
-	lena = UART_GetNextByte(4); // hi
-	lenb = UART_GetNextByte(5); // lo
+	version = UART_GetByte(2);
+	command = UART_GetByte(3);
+	lena = UART_GetByte(4); // hi
+	lenb = UART_GetByte(5); // lo
 	len = lenb | lena >> 8;
 	// now check if we have received whole packet
 	len += 2 + 1 + 1 + 2 + 1; // header 2 bytes, version, command, lenght, chekcusm
@@ -284,7 +304,7 @@ int UART_TryToGetNextTuyaPacket(byte* out, int maxSize) {
 		// can packet fit into the buffer?
 		if (len <= maxSize) {
 			for (i = 0; i < len; i++) {
-				out[i] = UART_GetNextByte(i);
+				out[i] = UART_GetByte(i);
 			}
 			ret = len;
 		}
@@ -559,11 +579,12 @@ Info:GEN:No change in channel 1 (still set to 0) - ignoring
 
 
 commandResult_t TuyaMCU_LinkTuyaMCUOutputToChannel(const void* context, const char* cmd, const char* args, int cmdFlags) {
-	int dpId;
 	const char* dpTypeString;
-	int dpType;
-	int channelID;
-	int argsCount;
+	byte dpId;
+	byte dpType;
+	byte channelID;
+	byte argsCount;
+	byte bDPCache;
 
 	// linkTuyaMCUOutputToChannel dpId varType channelID
 	// linkTuyaMCUOutputToChannel 1 val 1
@@ -622,8 +643,9 @@ commandResult_t TuyaMCU_LinkTuyaMCUOutputToChannel(const void* context, const ch
 	else {
 		channelID = Tokenizer_GetArgInteger(2);
 	}
+	bDPCache = Tokenizer_GetArgInteger(3);
 
-	TuyaMCU_MapIDToChannel(dpId, dpType, channelID);
+	TuyaMCU_MapIDToChannel(dpId, dpType, channelID, bDPCache);
 
 	return CMD_RES_OK;
 }
@@ -729,6 +751,10 @@ void Tuya_SetWifiState(uint8_t state)
 {
 	TuyaMCU_SendCommandWithData(TUYA_CMD_WIFI_STATE, &state, 1);
 }
+void Tuya_SetWifiState_V0(uint8_t state)
+{
+	TuyaMCU_SendCommandWithData(0x02, &state, 1);
+}
 
 void TuyaMCU_SendNetworkStatus()
 {
@@ -831,6 +857,11 @@ void TuyaMCU_OnChannelChanged(int channel, int iVal) {
 		return;
 	}
 
+	// dpCaches are sent when requested - TODO - is it correct?
+	if (mapping->bDPCache) {
+		return;
+	}
+
 	// map value depending on channel type
 	switch (CHANNEL_GetType(mapping->channel))
 	{
@@ -886,6 +917,13 @@ void TuyaMCU_ParseQueryProductInformation(const byte* data, int len) {
 	name[useLen] = 0;
 
 	addLogAdv(LOG_INFO, LOG_FEATURE_TUYAMCU, "TuyaMCU_ParseQueryProductInformation: received %s\n", name);
+
+	if (g_sensorMode) {
+		if (g_tuyaBatteryPoweredState == TM0_STATE_AWAITING_INFO) {
+			g_tuyaBatteryPoweredState = TM0_STATE_AWAITING_WIFI;
+			g_tuyaNextRequestDelay = 0;
+		}
+	}
 }
 // See: https://www.elektroda.com/rtvforum/viewtopic.php?p=20345606#20345606
 void TuyaMCU_ParseWeatherData(const byte* data, int len) {
@@ -997,6 +1035,17 @@ void TuyaMCU_V0_ParseRealTimeWithRecordStorage(const byte* data, int len, bool b
 
 		// size of header (type, datatype, len 2 bytes) + data sector size
 		ofs += (4 + sectorLen);
+	}
+	if (g_sensorMode) {
+		if (g_tuyaBatteryPoweredState == TM0_STATE_AWAITING_STATES) {
+			if (bIncludesDate) {
+				g_tuyaMCUConfirmationsToSend_0x08++;
+			}
+			else {
+				g_tuyaMCUConfirmationsToSend_0x05++;
+			}
+			g_tuyaNextRequestDelay++;
+		}
 	}
 }
 void TuyaMCU_ParseStateMessage(const byte* data, int len) {
@@ -1114,13 +1163,103 @@ void TuyaMCU_ParseStateMessage(const byte* data, int len) {
 	}
 
 }
+void TuyaMCU_ResetWiFi() {
+	g_resetWiFiEvents++;
+
+	if (g_resetWiFiEvents >= 3) {
+		g_openAP = 1;
+	}
+}
 #define TUYA_V0_CMD_PRODUCTINFORMATION      0x01
 #define TUYA_V0_CMD_NETWEORKSTATUS          0x02
 #define TUYA_V0_CMD_RESETWIFI               0x03
 #define TUYA_V0_CMD_RESETWIFI_AND_SEL_CONF  0x04
 #define TUYA_V0_CMD_REALTIMESTATUS          0x05
 #define TUYA_V0_CMD_RECORDSTATUS            0x08
+#define TUYA_V0_CMD_OBTAINDPCACHE           0x10
 
+void TuyaMCU_V0_SendDPCacheReply() {
+#if 0
+	// send empty?
+	byte dat = 0x00;
+	TuyaMCU_SendCommandWithData(0x10, &dat, 1);
+#else
+	int i;
+	int dataLen;
+	int value;
+	int writtenCount;
+	byte *p;
+	byte buffer[64];
+	tuyaMCUMapping_t *map;
+
+	buffer[0] = 0x01; // OK
+	buffer[1] = 0x00; // number of variables, will update later
+
+	writtenCount = 0;
+	dataLen = 2;
+	p = buffer + dataLen;
+
+	map = g_tuyaMappings;
+	// packet is the following:
+	// 01 02 
+	// result 1 (OK), numVars 2
+	// 11 02 0004 00000001  		
+	// fnId = 17 Len = 0004 Val V = 1
+	// 12 02 0004 00000001
+	// fnId = 18 Len = 0004 Val V = 1	
+	// 
+	while(map) {
+		if (map->bDPCache) {
+			writtenCount++;
+			// dpID
+			*p = map->fnId;
+			p++;
+			// type
+			*p = map->dpType;
+			p++;
+			// lenght
+			*p = 0;
+			p++;
+			value = CHANNEL_Get(map->channel);
+			switch (map->dpType) {
+			case DP_TYPE_ENUM:
+				// set len
+				*p = 1;
+				p++;
+				// set data 
+				*p = value;
+				p++;
+				break;
+			case DP_TYPE_VALUE:
+				// set len
+				*p = 4;
+				p++;
+				// set data 
+				p[3] = (value >> 0) & 0xFF; // first byte (lowest bits)
+				p[2] = (value >> 8) & 0xFF; // first byte (lowest bits)
+				p[1] = (value >> 16) & 0xFF; // first byte (lowest bits)
+				p[0] = (value >> 24) & 0xFF; // first byte (lowest bits)
+				p += 4;
+				break;
+			default:
+			case DP_TYPE_BOOL:
+				// set len
+				*p = 1;
+				p++;
+				// set data 
+				*p = value;
+				p++;
+				break;
+			}
+		}
+		map = map->next;
+	}
+	dataLen = p - buffer;
+	buffer[1] = writtenCount;
+
+	TuyaMCU_SendCommandWithData(0x10, buffer, dataLen);
+#endif
+}
 void TuyaMCU_ProcessIncoming(const byte* data, int len) {
 	int checkLen;
 	int i;
@@ -1184,9 +1323,23 @@ void TuyaMCU_ProcessIncoming(const byte* data, int len) {
 		else {
 			addLogAdv(LOG_INFO, LOG_FEATURE_TUYAMCU, "TuyaMCU_ProcessIncoming: TUYA_CMD_MCU_CONF, TODO!");
 		}
+		if (g_sensorMode) {
+			if (g_tuyaBatteryPoweredState == TM0_STATE_AWAITING_WIFI) {
+				g_tuyaBatteryPoweredState = TM0_STATE_AWAITING_MQTT;
+			} else if (g_tuyaBatteryPoweredState == TM0_STATE_AWAITING_MQTT) {
+				g_tuyaBatteryPoweredState = TM0_STATE_AWAITING_STATES;
+				g_tuyaNextRequestDelay = 0;
+			}
+		}
 		break;
 	case TUYA_CMD_WIFI_STATE:
-		wifi_state_valid = true;
+		if (g_sensorMode) {
+			// for TuyaMCU v0, 0x03 is a pair button hold event
+			TuyaMCU_ResetWiFi();
+		}
+		else {
+			wifi_state_valid = true;
+		}
 		break;
 
 	case TUYA_CMD_STATE:
@@ -1213,6 +1366,13 @@ void TuyaMCU_ProcessIncoming(const byte* data, int len) {
 		}
 		else {
 
+		}
+		break;
+	case TUYA_V0_CMD_OBTAINDPCACHE:
+		// This is sent by TH01
+		// Info:TuyaMCU:TUYAMCU received: 55 AA 00 10 00 02 01 09 1B
+		{
+			TuyaMCU_V0_SendDPCacheReply();
 		}
 		break;
 	case 0x05:
@@ -1309,20 +1469,11 @@ void TuyaMCU_RunWiFiUpdateAndPackets() {
 		//addLogAdv(LOG_INFO, LOG_FEATURE_TUYAMCU,"TuyaMCU_Wifi_State timer");
 	}
 }
-void TuyaMCU_RunFrame() {
+void TuyaMCU_RunReceive() {
 	byte data[128];
 	char buffer_for_log[256];
 	char buffer2[4];
 	int len, i;
-
-	//addLogAdv(LOG_INFO, LOG_FEATURE_TUYAMCU,"UART ring buffer state: %i %i\n",g_recvBufIn,g_recvBufOut);
-
-	// extraDebug log level
-	addLogAdv(LOG_EXTRADEBUG, LOG_FEATURE_TUYAMCU, "TuyaMCU heartbeat_valid = %i, product_information_valid=%i,"
-		" self_processing_mode = %i, wifi_state_valid = %i, wifi_state_timer=%i\n",
-		(int)heartbeat_valid, (int)product_information_valid, (int)self_processing_mode,
-		(int)wifi_state_valid, (int)wifi_state_timer);
-
 	while (1)
 	{
 		len = UART_TryToGetNextTuyaPacket(data, sizeof(data));
@@ -1351,7 +1502,16 @@ void TuyaMCU_RunFrame() {
 			break;
 		}
 	}
+}
+void TuyaMCU_RunStateMachine_V3() {
 
+	//addLogAdv(LOG_INFO, LOG_FEATURE_TUYAMCU,"UART ring buffer state: %i %i\n",g_recvBufIn,g_recvBufOut);
+
+	// extraDebug log level
+	addLogAdv(LOG_EXTRADEBUG, LOG_FEATURE_TUYAMCU, "TuyaMCU heartbeat_valid = %i, product_information_valid=%i,"
+		" self_processing_mode = %i, wifi_state_valid = %i, wifi_state_timer=%i\n",
+		(int)heartbeat_valid, (int)product_information_valid, (int)self_processing_mode,
+		(int)wifi_state_valid, (int)wifi_state_timer);
 	/* Command controll */
 	if (heartbeat_timer == 0)
 	{
@@ -1382,7 +1542,7 @@ void TuyaMCU_RunFrame() {
 		else {
 			heartbeat_timer = 0;
 		}
-		if (heartbeat_valid == true && DRV_IsRunning("tmSensor") == false)
+		if (heartbeat_valid == true)
 		{
 			/* Connection Active */
 			if (product_information_valid == false)
@@ -1426,6 +1586,69 @@ void TuyaMCU_RunFrame() {
 		}
 	}
 }
+void TuyaMCU_RunStateMachine_BatteryPowered() {
+	g_tuyaNextRequestDelay--;
+	switch (g_tuyaBatteryPoweredState) {
+	case TM0_STATE_AWAITING_INFO:
+		if (g_tuyaNextRequestDelay <= 0) {
+			TuyaMCU_Send_RawBuffer(g_hello, sizeof(g_hello));
+			// retry 
+			g_tuyaNextRequestDelay = 3;
+		}
+		break;
+	case TM0_STATE_AWAITING_WIFI:
+		if (g_tuyaNextRequestDelay <= 0) {
+			if (Main_IsConnectedToWiFi()) {
+				// send wifi state 0x03 
+				Tuya_SetWifiState_V0(0x03);
+				// retry
+				g_tuyaNextRequestDelay = 3;
+			}
+		}
+		break;
+	case TM0_STATE_AWAITING_MQTT:
+		if (g_tuyaNextRequestDelay <= 0) {
+#if WINDOWS
+			if (true)
+#else
+			if (Main_HasMQTTConnected() || g_defaultTuyaMCUWiFiState == 0x04)
+#endif
+			{
+				// send wifi state 0x04 
+				Tuya_SetWifiState_V0(0x04);
+				// retry
+				g_tuyaNextRequestDelay = 3;
+			}
+		}
+		break;
+	case TM0_STATE_AWAITING_STATES:
+		if (g_tuyaNextRequestDelay <= 0) {
+			byte dat = 0x00;
+			if (g_tuyaMCUConfirmationsToSend_0x08 > 0) {
+				g_tuyaMCUConfirmationsToSend_0x08--;
+				TuyaMCU_SendCommandWithData(0x08, &dat, 1);
+				g_tuyaNextRequestDelay = 2;
+			}
+			else if (g_tuyaMCUConfirmationsToSend_0x05 > 0) {
+				g_tuyaMCUConfirmationsToSend_0x05--;
+				TuyaMCU_SendCommandWithData(0x05, &dat, 1);
+				g_tuyaNextRequestDelay = 2;
+			}
+			break;
+		}
+	}
+}
+void TuyaMCU_RunFrame() {
+	TuyaMCU_RunReceive();
+
+	g_sensorMode = DRV_IsRunning("tmSensor");
+	if (g_sensorMode) {
+		TuyaMCU_RunStateMachine_BatteryPowered();
+	}
+	else {
+		TuyaMCU_RunStateMachine_V3();
+	}
+}
 
 
 commandResult_t TuyaMCU_SetBaudRate(const void* context, const char* cmd, const char* args, int cmdFlags) {
@@ -1438,6 +1661,7 @@ commandResult_t TuyaMCU_SetBaudRate(const void* context, const char* cmd, const 
 	}
 
 	g_baudRate = Tokenizer_GetArgInteger(0);
+	UART_InitUART(g_baudRate);
 
 	return CMD_RES_OK;
 }
@@ -1445,6 +1669,22 @@ commandResult_t TuyaMCU_SetBaudRate(const void* context, const char* cmd, const 
 
 void TuyaMCU_Init()
 {
+	// this is only for simulator, where multiple sessions can happen...
+	tuyaMCUMapping_t *tmp, *nxt;
+	tmp = g_tuyaMappings;
+	while (tmp) {
+		nxt = tmp->next;
+		free(tmp);
+		tmp = nxt;
+	}
+	g_tuyaMappings = 0;
+
+	g_resetWiFiEvents = 0;
+	g_tuyaNextRequestDelay = 1;
+	g_tuyaBatteryPoweredState = 0; 
+	g_tuyaMCUConfirmationsToSend_0x05 = 0;
+	g_tuyaMCUConfirmationsToSend_0x08 = 0;
+
 	UART_InitUART(g_baudRate);
 	UART_InitReceiveRingBuffer(256);
 	// uartSendHex 55AA0008000007
@@ -1459,8 +1699,8 @@ void TuyaMCU_Init()
 	//cmddetail:"examples":""}
 	CMD_RegisterCommand("tuyaMcu_sendCurTime", TuyaMCU_Send_SetTime_Current, NULL);
 	///CMD_RegisterCommand("tuyaMcu_sendSimple","",TuyaMCU_Send_Simple, "Appends a 0x55 0xAA header to a data, append a checksum at end and send");
-	//cmddetail:{"name":"linkTuyaMCUOutputToChannel","args":"[dpId][varType][channelID]",
-	//cmddetail:"descr":"Used to map between TuyaMCU dpIDs and our internal channels. Mapping works both ways. DpIDs are per-device, you can get them by sniffing UART communication. Vartypes can also be sniffed from Tuya. VarTypes can be following: 0-raw, 1-bool, 2-value, 3-string, 4-enum, 5-bitmap",
+	//cmddetail:{"name":"linkTuyaMCUOutputToChannel","args":"[dpId][varType][channelID][bDPCache-Optional]",
+	//cmddetail:"descr":"Used to map between TuyaMCU dpIDs and our internal channels. Last argument is optional and 0 by default. You can set it to 1 for battery powered devices, so a variable is set with DPCache, for example a sampling interval for humidity/temperature sensor. Mapping works both ways. DpIDs are per-device, you can get them by sniffing UART communication. Vartypes can also be sniffed from Tuya. VarTypes can be following: 0-raw, 1-bool, 2-value, 3-string, 4-enum, 5-bitmap. Please see [Tuya Docs](https://developer.tuya.com/en/docs/iot/tuya-cloud-universal-serial-port-access-protocol?id=K9hhi0xxtn9cb) for info about TuyaMCU. You can also see our [TuyaMCU Analyzer Tool](https://www.elektroda.com/rtvforum/viewtopic.php?p=20528459#20528459)",
 	//cmddetail:"fn":"TuyaMCU_LinkTuyaMCUOutputToChannel","file":"driver/drv_tuyaMCU.c","requires":"",
 	//cmddetail:"examples":""}
 	CMD_RegisterCommand("linkTuyaMCUOutputToChannel", TuyaMCU_LinkTuyaMCUOutputToChannel, NULL);

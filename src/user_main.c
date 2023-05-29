@@ -37,6 +37,7 @@
 
 #include "driver/drv_ntp.h"
 #include "driver/drv_ssdp.h"
+#include "driver/drv_uart.h"
 
 #ifdef PLATFORM_BEKEN
 #include <mcu_ps.h>
@@ -44,7 +45,7 @@
 void bg_register_irda_check_func(FUNCPTR func);
 #endif
 
-static int g_secondsElapsed = 0;
+int g_secondsElapsed = 0;
 // open access point after this number of seconds
 int g_openAP = 0;
 // connect to wifi after this number of seconds
@@ -165,10 +166,6 @@ void MAIN_ScheduleUnsafeInit(int delSeconds) {
 }
 void RESET_ScheduleModuleReset(int delSeconds) {
 	g_reset = delSeconds;
-}
-
-int Time_getUpTimeSeconds() {
-	return g_secondsElapsed;
 }
 
 
@@ -359,6 +356,7 @@ bool Main_HasFastConnect() {
 	}
 	return false;
 }
+static byte g_secondsSpentInLowMemoryWarning = 0;
 void Main_OnEverySecond()
 {
 	int newMQTTState;
@@ -397,8 +395,12 @@ void Main_OnEverySecond()
 	g_noMQTTTime = i;
 
 	MQTT_Dedup_Tick();
+	LED_RunOnEverySecond();
 #ifndef OBK_DISABLE_ALL_DRIVERS
 	DRV_OnEverySecond();
+#if defined(PLATFORM_BEKEN) || defined(WINDOWS) || defined(PLATFORM_BL602)
+	UART_RunEverySecond();
+#endif
 #endif
 
 #if WINDOWS
@@ -412,6 +414,19 @@ void Main_OnEverySecond()
 		CFG_Save_IfThereArePendingChanges();
 	}
 
+	// On Beken, do reboot if we ran into heap size problem
+#if PLATFORM_BEKEN
+	if (xPortGetFreeHeapSize() < 25 * 1000) {
+		g_secondsSpentInLowMemoryWarning++;
+		ADDLOGF_ERROR("Low heap warning!\n");
+		if (g_secondsSpentInLowMemoryWarning > 5) {
+			HAL_RebootModule();
+		}
+	}
+	else {
+		g_secondsSpentInLowMemoryWarning = 0;
+	}
+#endif
 	if (bSafeMode == 0) {
 		const char* ip = HAL_GetMyIPString();
 		// this will return non-zero if there were any changes
@@ -530,7 +545,7 @@ void Main_OnEverySecond()
 		{
 			ADDLOGF_INFO("Boot complete time reached (%i seconds)\n", bootCompleteSeconds);
 			HAL_FlashVars_SaveBootComplete();
-			g_bootFailures = HAL_FlashVars_GetBootFailures();
+			//g_bootFailures = HAL_FlashVars_GetBootFailures();
 			g_bBootMarkedOK = true;
 		}
 	}
@@ -978,6 +993,22 @@ void Main_Init_BeforeDelay_Unsafe(bool bAutoRunScripts) {
 			if (PIN_FindPinIndexForRole(IOR_TM1637_CLK, -1) != -1 && PIN_FindPinIndexForRole(IOR_TM1637_DIO, -1) != -1) {
 #ifndef OBK_DISABLE_ALL_DRIVERS
 				DRV_StartDriver("TM1637");
+#endif
+			}
+			if ((PIN_FindPinIndexForRole(IOR_GN6932_CLK, -1) != -1) &&
+				(PIN_FindPinIndexForRole(IOR_GN6932_DAT, -1) != -1) &&
+				(PIN_FindPinIndexForRole(IOR_GN6932_STB, -1) != -1))
+			{
+#ifndef OBK_DISABLE_ALL_DRIVERS
+				DRV_StartDriver("GN6932");
+#endif
+			}
+			if ((PIN_FindPinIndexForRole(IOR_TM1638_CLK, -1) != -1) &&
+				(PIN_FindPinIndexForRole(IOR_TM1638_DAT, -1) != -1) &&
+				(PIN_FindPinIndexForRole(IOR_TM1638_STB, -1) != -1))
+			{
+#ifndef OBK_DISABLE_ALL_DRIVERS
+				DRV_StartDriver("TM1638");
 #endif
 			}
 		}
