@@ -78,7 +78,10 @@ void DoorDeepSleep_OnEverySecond() {
 					sprintf(tmp, "%i", g_cfg.pins.channels[i]);
 					bValue = BIT_CHECK(g_initialPinStates, i);
 					//Toogle for tuya default
-					bValue ^= 1;
+					addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "ALEX antes LOG val %i to channel %s g_initialStateSent=%i\n", bValue, tmp, g_initialStateSent);
+					bValue = (bValue == 0) ? 1 : 0;  		
+					addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "ALEX depois LOG val %i to channel %s g_initialStateSent=%i\n", bValue, tmp, g_initialStateSent);
+		
 					MQTT_PublishMain_StringInt(tmp,bValue);
 				}
 			}
@@ -88,7 +91,16 @@ void DoorDeepSleep_OnEverySecond() {
 				if (g_cfg.pins.roles[i] == IOR_DoorSensorWithDeepSleep ||
 					g_cfg.pins.roles[i] == IOR_DoorSensorWithDeepSleep_NoPup ||
 					g_cfg.pins.roles[i] == IOR_DoorSensorWithDeepSleep_pd) {
-					MQTT_ChannelPublish(g_cfg.pins.channels[i], 0);
+					//MQTT_ChannelPublish(g_cfg.pins.channels[i], 0);
+					sprintf(tmp, "%i", g_cfg.pins.channels[i]);
+					bValue = BIT_CHECK(g_initialPinStates, i);
+
+					//Toogle for tuya default
+					addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "ALEX antes LOG val %i to channel %s g_initialStateSent=%i\n", bValue, tmp, g_initialStateSent);
+					bValue = (bValue == 0) ? 1 : 0;
+					addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "ALEX depois LOG val %i to channel %s g_initialStateSent=%i\n", bValue, tmp, g_initialStateSent);
+
+					MQTT_PublishMain_StringInt(tmp, bValue);
 				}
 			}
 		}
