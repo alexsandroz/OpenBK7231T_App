@@ -160,16 +160,25 @@ static driver_t g_drivers[] = {
 	//drvdetail:"descr":"SSDP is a discovery protocol, so BK devices can show up in, for example, Windows network section",
 	//drvdetail:"requires":""}
 	{ "SSDP",		DRV_SSDP_Init,		DRV_SSDP_RunEverySecond,	NULL, DRV_SSDP_RunQuickTick, DRV_SSDP_Shutdown, NULL, false },
-	//drvdetail:{"name":"Wemo",
-	//drvdetail:"title":"TODO",
-	//drvdetail:"descr":"Wemo emulation for Alexa. You must also start SSDP so it can run, because it depends on SSDP discovery.",
-	//drvdetail:"requires":""}
-	{ "Wemo",		WEMO_Init,		NULL,		WEMO_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
 	//drvdetail:{"name":"DGR",
 	//drvdetail:"title":"TODO",
 	//drvdetail:"descr":"Tasmota Device groups driver. See [forum example](https://www.elektroda.com/rtvforum/topic3925472.html) and TODO-video tutorial (will post on YT soon)",
 	//drvdetail:"requires":""}
 	{ "DGR",		DRV_DGR_Init,		DRV_DGR_RunEverySecond,		DRV_DGR_AppendInformationToHTTPIndexPage, DRV_DGR_RunQuickTick, DRV_DGR_Shutdown, DRV_DGR_OnChannelChanged, false },
+#endif
+#if ENABLE_DRIVER_WEMO
+	//drvdetail:{"name":"Wemo",
+	//drvdetail:"title":"TODO",
+	//drvdetail:"descr":"Wemo emulation for Alexa. You must also start SSDP so it can run, because it depends on SSDP discovery.",
+	//drvdetail:"requires":""}
+	{ "Wemo",		WEMO_Init,		NULL,		WEMO_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
+#endif
+#if ENABLE_DRIVER_HUE
+	//drvdetail:{"name":"Hue",
+	//drvdetail:"title":"TODO",
+	//drvdetail:"descr":"Hue emulation for Alexa. You must also start SSDP so it can run, because it depends on SSDP discovery.",
+	//drvdetail:"requires":""}
+	{ "Hue",		HUE_Init,		NULL,		HUE_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
 #endif
 #if defined(PLATFORM_BEKEN) || defined(WINDOWS)
 	//drvdetail:{"name":"PWMToggler",
@@ -182,11 +191,14 @@ static driver_t g_drivers[] = {
 	//drvdetail:"descr":"DoorSensor is using deep sleep to preserve battery. This is used for devices without TuyaMCU, where BK deep sleep and wakeup on GPIO is used. This drives requires you to set a DoorSensor pin. Change on door sensor pin wakes up the device. If there are no changes for some time, device goes to sleep. See example [here](https://www.elektroda.com/rtvforum/topic3960149.html). If your door sensor does not wake up in certain pos, please use DSEdge command (try all 3 options, default is 2). ",
 	//drvdetail:"requires":""}
 	{ "DoorSensor",		DoorDeepSleep_Init,		DoorDeepSleep_OnEverySecond,	DoorDeepSleep_AppendInformationToHTTPIndexPage, NULL, NULL, DoorDeepSleep_OnChannelChanged, false },
+
+#ifdef ENABLE_DRIVER_MAX72XX
 	//drvdetail:{"name":"MAX72XX_Clock",
 	//drvdetail:"title":"TODO",
 	//drvdetail:"descr":"Simple hardcoded driver for MAX72XX clock. Requirex manual start of MAX72XX driver with MAX72XX setup and NTP start.",
 	//drvdetail:"requires":""}
 	{ "MAX72XX_Clock",		DRV_MAX72XX_Clock_Init,		DRV_MAX72XX_Clock_OnEverySecond,	NULL, DRV_MAX72XX_Clock_RunFrame, NULL, NULL, false },
+#endif
 	//drvdetail:{"name":"ADCButton",
 	//drvdetail:"title":"TODO",
 	//drvdetail:"descr":"This allows you to connect multiple buttons on single ADC pin. Each button must have a different resistor value, this works by probing the voltage on ADC from a resistor divider. You need to select AB_Map first. See forum post for [details](https://www.elektroda.com/rtvforum/viewtopic.php?p=20541973#20541973).",
@@ -221,16 +233,28 @@ static driver_t g_drivers[] = {
 	//drvdetail:"descr":"CHT8305 is a Temperature and Humidity sensor with I2C interface.",
 	//drvdetail:"requires":""}
 	{ "CHT8305",	CHT8305_Init,		CHT8305_OnEverySecond,		CHT8305_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
+	//drvdetail:{"name":"CHT8305",
+	//drvdetail:"title":"TODO",
+	//drvdetail:"descr":"CHT8305 is a Temperature and Humidity sensor with I2C interface.",
+	//drvdetail:"requires":""}
+	{ "MCP9808",	MCP9808_Init,		MCP9808_OnEverySecond,		MCP9808_AppendInformationToHTTPIndexPage, NULL, NULL, NULL, false },
 	//drvdetail:{"name":"KP18068",
 	//drvdetail:"title":"TODO",
 	//drvdetail:"descr":"KP18068 I2C LED driver",
 	//drvdetail:"requires":""}
 	{ "KP18068",		KP18068_Init,		NULL,			NULL, NULL, NULL, NULL, false },
+	//drvdetail:{"name":"KP18058",
+	//drvdetail:"title":"TODO",
+	//drvdetail:"descr":"KP18058 I2C LED driver",
+	//drvdetail:"requires":""}
+	{ "KP18058",		KP18058_Init,		NULL,			NULL, NULL, NULL, NULL, false },
+#ifdef ENABLE_DRIVER_MAX72XX
 	//drvdetail:{"name":"MAX72XX",
 	//drvdetail:"title":"TODO",
 	//drvdetail:"descr":"MAX72XX LED matrix display driver with font and simple script interface.",
 	//drvdetail:"requires":""}
 	{ "MAX72XX",	DRV_MAX72XX_Init,		NULL,		NULL, NULL, NULL, NULL, false },
+#endif
 	//drvdetail:{"name":"TM1637",
 	//drvdetail:"title":"TODO",
 	//drvdetail:"descr":"Driver for 7-segment LED display with DIO/CLK interface",
@@ -246,6 +270,13 @@ static driver_t g_drivers[] = {
 	//drvdetail:"descr":"Driver for 7-segment LED display with DIO/CLK/STB interface. TM1638 is very similiar to GN6932 and TM1637. See [this topic](https://www.elektroda.com/rtvforum/viewtopic.php?p=20553628#20553628) for details.",
 	//drvdetail:"requires":""}
 	{ "TM1638",	TM1638_Init,		NULL,		NULL, TMGN_RunQuickTick,NULL,  NULL, false },
+#if ENABLE_DRIVER_HT16K33
+	//drvdetail:{"name":"HT16K33",
+	//drvdetail:"title":"TODO",
+	//drvdetail:"descr":"Driver for 16-segment LED display with I2C.",
+	//drvdetail:"requires":""}
+	{ "HT16K33",	HT16K33_Init,		NULL,		NULL, NULL,NULL,  NULL, false },
+#endif
 	//drvdetail:{"name":"SHT3X",
 	//drvdetail:"title":"TODO",
 	//drvdetail:"descr":"Humidity/temperature sensor. See [SHT Sensor tutorial topic here](https://www.elektroda.com/rtvforum/topic3958369.html), also see [this sensor teardown](https://www.elektroda.com/rtvforum/topic3945688.html)",

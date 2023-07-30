@@ -33,9 +33,29 @@
 int BTN_SHORT_MS;
 int BTN_LONG_MS;
 int BTN_HOLD_REPEAT_MS;
-byte g_defaultWakeEdge = 2;
+byte *g_defaultWakeEdge = 0;
 int g_initialPinStates = 0;
 
+void PIN_DeepSleep_MakeSureEdgesAreAlloced() {
+	int i;
+	if (g_defaultWakeEdge == 0) {
+		g_defaultWakeEdge = (byte*)malloc(PLATFORM_GPIO_MAX);
+		for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
+			g_defaultWakeEdge[i] = 2;//default
+		}
+	}
+}
+void PIN_DeepSleep_SetWakeUpEdge(int pin, byte edgeCode) {
+	PIN_DeepSleep_MakeSureEdgesAreAlloced();
+	g_defaultWakeEdge[pin] = edgeCode;
+}
+void PIN_DeepSleep_SetAllWakeUpEdges(byte edgeCode) {
+	int i;
+	PIN_DeepSleep_MakeSureEdgesAreAlloced();
+	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
+		g_defaultWakeEdge[i] = edgeCode;
+	}
+}
 typedef enum {
 	BTN_PRESS_DOWN = 0,
 	BTN_PRESS_UP,
@@ -142,7 +162,7 @@ void PINS_BeginDeepSleepWithPinWakeUp() {
 			// https://www.elektroda.pl/rtvforum/viewtopic.php?p=20543190#20543190
 			// forcing a certain edge for both states helps on some door sensors, somehow
 			// 0 means always wake up on rising edge, 1 means on falling, 2 means if state is high, use falling edge, if low, use rising
-			if (g_defaultWakeEdge == 2) {
+			if (g_defaultWakeEdge == NULL || g_defaultWakeEdge[i] == 2) {
 				value = HAL_PIN_ReadDigitalInput(i);
 				if (value) {
 					// on falling edge wake up
@@ -154,7 +174,7 @@ void PINS_BeginDeepSleepWithPinWakeUp() {
 				}
 			}
 			else {
-				falling = g_defaultWakeEdge;
+				falling = g_defaultWakeEdge[i];
 			}
 			setGPIActive(i, 1, falling);
 		}
@@ -306,12 +326,22 @@ void RAW_SetPinValue(int index, int iVal) {
 	}
 }
 void Button_OnPressRelease(int index) {
+	if (CFG_HasFlag(OBK_FLAG_BUTTON_DISABLE_ALL)) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Child lock!");
+		return;
+	}
 	// fire event - button on pin <index> was released
 	EventHandlers_FireEvent(CMD_EVENT_PIN_ONRELEASE, index);
 }
 void Button_OnInitialPressDown(int index)
 {
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "%i Button_OnInitialPressDown\r\n", index);
+
+	if (CFG_HasFlag(OBK_FLAG_BUTTON_DISABLE_ALL)) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Child lock!");
+		return;
+	}
+
 	EventHandlers_FireEvent(CMD_EVENT_PIN_ONPRESS, index);
 
 	// so-called SetOption13 - instant reaction to touch instead of waiting for release
@@ -354,6 +384,10 @@ void Button_OnInitialPressDown(int index)
 void Button_OnShortClick(int index)
 {
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "%i key_short_press\r\n", index);
+	if (CFG_HasFlag(OBK_FLAG_BUTTON_DISABLE_ALL)) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Child lock!");
+		return;
+	}
 	// fire event - button on pin <index> was clicked
 	EventHandlers_FireEvent(CMD_EVENT_PIN_ONCLICK, index);
 	// so-called SetOption13 - instant reaction to touch instead of waiting for release
@@ -394,6 +428,10 @@ void Button_OnShortClick(int index)
 void Button_OnDoubleClick(int index)
 {
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "%i key_double_press\r\n", index);
+	if (CFG_HasFlag(OBK_FLAG_BUTTON_DISABLE_ALL)) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Child lock!");
+		return;
+	}
 	if (g_cfg.pins.roles[index] == IOR_Button_ToggleAll || g_cfg.pins.roles[index] == IOR_Button_ToggleAll_n)
 	{
 		CHANNEL_DoSpecialToggleAll();
@@ -419,6 +457,10 @@ void Button_OnDoubleClick(int index)
 void Button_OnTripleClick(int index)
 {
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "%i key_triple_press\r\n", index);
+	if (CFG_HasFlag(OBK_FLAG_BUTTON_DISABLE_ALL)) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Child lock!");
+		return;
+	}
 	// fire event - button on pin <index> was 3clicked
 	EventHandlers_FireEvent(CMD_EVENT_PIN_ON3CLICK, index);
 	if (g_cfg.pins.roles[index] == IOR_SmartButtonForLEDs || g_cfg.pins.roles[index] == IOR_SmartButtonForLEDs_n) {
@@ -430,17 +472,29 @@ void Button_OnTripleClick(int index)
 void Button_OnQuadrupleClick(int index)
 {
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "%i key_quadruple_press\r\n", index);
+	if (CFG_HasFlag(OBK_FLAG_BUTTON_DISABLE_ALL)) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Child lock!");
+		return;
+	}
 	// fire event - button on pin <index> was 4clicked
 	EventHandlers_FireEvent(CMD_EVENT_PIN_ON4CLICK, index);
 }
 void Button_On5xClick(int index)
 {
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "%i key_5x_press\r\n", index);
+	if (CFG_HasFlag(OBK_FLAG_BUTTON_DISABLE_ALL)) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Child lock!");
+		return;
+	}
 	// fire event - button on pin <index> was 4clicked
 	EventHandlers_FireEvent(CMD_EVENT_PIN_ON5CLICK, index);
 }
 void Button_OnLongPressHold(int index) {
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "%i Button_OnLongPressHold\r\n", index);
+	if (CFG_HasFlag(OBK_FLAG_BUTTON_DISABLE_ALL)) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Child lock!");
+		return;
+	}
 	// fire event - button on pin <index> was held
 	EventHandlers_FireEvent(CMD_EVENT_PIN_ONHOLD, index);
 
@@ -458,6 +512,10 @@ void Button_OnLongPressHold(int index) {
 }
 void Button_OnLongPressHoldStart(int index) {
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "%i Button_OnLongPressHoldStart\r\n", index);
+	if (CFG_HasFlag(OBK_FLAG_BUTTON_DISABLE_ALL)) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Child lock!");
+		return;
+	}
 	// fire event - button on pin <index> was held
 	EventHandlers_FireEvent(CMD_EVENT_PIN_ONHOLDSTART, index);
 }
@@ -1691,10 +1749,17 @@ void PIN_ticks(void* param)
 					if (g_lastValidState[i] != value) {
 						// became up
 						g_lastValidState[i] = value;
-						CHANNEL_Toggle(g_cfg.pins.channels[i]);
-						// fire event - IOR_ToggleChannelOnToggle has been toggle
-						// Argument is a pin number (NOT channel)
-						EventHandlers_FireEvent(CMD_EVENT_PIN_ONTOGGLE, i);
+
+
+						if (CFG_HasFlag(OBK_FLAG_BUTTON_DISABLE_ALL)) {
+							addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Child lock!");
+						}
+						else {
+							CHANNEL_Toggle(g_cfg.pins.channels[i]);
+							// fire event - IOR_ToggleChannelOnToggle has been toggle
+							// Argument is a pin number (NOT channel)
+							EventHandlers_FireEvent(CMD_EVENT_PIN_ONTOGGLE, i);
+						}
 						// lock for given time
 						g_times[i] = debounceMS;
 					}
@@ -1795,7 +1860,7 @@ const char* g_channelTypeNames[] = {
 	"Power_div10",
 	"ReadOnlyLowMidHigh",
 	"SmokePercent",
-	"error",
+	"Illuminance",
 	"error",
 	"error",
 	"error",
