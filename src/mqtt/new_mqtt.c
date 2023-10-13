@@ -1128,6 +1128,7 @@ static int MQTT_do_connect(mqtt_client_t* client)
 	int res;
 	struct hostent* hostEntry;
 	char will_topic[CGF_MQTT_CLIENT_ID_SIZE + 16];
+	bool mqtt_use_tls;
 
 	mqtt_host = CFG_GetMQTTHost();
 
@@ -1141,6 +1142,7 @@ static int MQTT_do_connect(mqtt_client_t* client)
 	mqtt_pass = CFG_GetMQTTPass();
 	mqtt_clientID = CFG_GetMQTTClientId();
 	mqtt_port = CFG_GetMQTTPort();
+	mqtt_use_tls = CFG_GetMQTTUseTls();
 
 	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "mqtt_userName %s\r\nmqtt_pass %s\r\nmqtt_clientID %s\r\nmqtt_host %s:%d\r\n",
 		mqtt_userName,
@@ -1187,6 +1189,27 @@ static int MQTT_do_connect(mqtt_client_t* client)
 			snprintf(mqtt_status_message, sizeof(mqtt_status_message), "mqtt_host resolves no addresses?");
 			return 0;
 		}
+		
+		/* Includes for MQTT over TLS */
+#if ENABLE_MQTT_TLS
+		/* Free older config before start */
+		if (mqtt_client_info.tls_config) {
+			altcp_wolfssl_free(mqtt_client_info.tls_config, NULL);
+			mqtt_client_info.tls_config = NULL;
+		}
+		if (mqtt_use_tls) {
+			LOCK_TCPIP_CORE();
+			mqtt_client_info.tls_config = altcp_tls_create_config_client(NULL, 0);
+			UNLOCK_TCPIP_CORE();
+			if (!mqtt_client_info.tls_config){
+				addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, "tls_config fail!!");
+				altcp_wolfssl_free(mqtt_client_info.tls_config, NULL);
+				return 0;
+			}
+			addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "tls_config created");
+		}
+#endif
+
 
 		// host name/ip
 		//ipaddr_aton(mqtt_host,&mqtt_ip);

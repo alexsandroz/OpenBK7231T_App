@@ -66,6 +66,7 @@
 #elif PLATFORM_BEKEN
 
 // set to 0 to disable
+#define ENABLE_MQTT_TLS         1
 #define ENABLE_LITTLEFS			1
 #define ENABLE_NTP    1
 #define ENABLE_DRIVER_LED       1

@@ -1,6 +1,11 @@
 #ifndef __NEW_MQTT_H__
 #define __NEW_MQTT_H__
 
+#include "obk_config.h"
+#if ENABLE_MQTT_TLS
+#include "lwip/altcp_tls.h"
+#endif
+
 #include "../new_common.h"
 
 #include "lwip/sockets.h"
