@@ -91,7 +91,7 @@
 
 #define MAX_SOCKETS_TCP                12
 #define MAX_LISTENING_SOCKETS_TCP       4
-#define MAX_SOCKETS_UDP                22
+#define MAX_SOCKETS_UDP                18
 
 /* Value of TCP_SND_BUF_COUNT denotes the number of buffers and is set by
  * CONFIG option available in the SDK
@@ -115,7 +115,7 @@
  * a lot of data that needs to be copied, this should be set high.
  */
 
-#define MEM_SIZE                       (15*1024) /* Reduced to fit at TCM */
+#define MEM_SIZE                       (16*1024) /* Reduced to fit at TCM */
 
 
 

@@ -22,19 +22,52 @@
 
 #include <string.h>
 
+char* err_msg;
+char* toHex(char* s, int len);
+char* toHex(char* s, int len)
+{
+	int i = 0;
+	memset(err_msg, 0, 100);
+	if (s && len > 0) {
+		if (len > 30) {
+			len = 30;
+		}
+		for (i = 0; i < len; ++i)
+		{
+			sprintf(&err_msg[i * 3], " %02X", s[i]);
+		}
+	}
+	return err_msg;
+}
+
 #ifdef DEBUG_WOLFSSL
 void ObkLoggingCallback(const int logLevel, const char* const logMessage);
 void ObkLoggingCallback(const int logLevel, const char* const logMessage)
 {
 	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, logMessage);
 }
-#endif
+#endif //DEBUG_WOLFSSL
+
+#ifdef CUSTOM_RAND_GENERATE_BLOCK
+#include "fake_clock_pub.h"
+int wolfssl_custom_random(unsigned char* buf, unsigned int len)
+{
+	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, "->wolfssl_custom_random len(%d)", len);
+	srand(fclk_get_second());
+	while (len--) {
+		*buf++ = rand() % 255;
+	}
+	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, " <-wolfssl_custom_random ret(%d)", 0);
+	return 0;
+}
+#endif //CUSTOM_RAND_GENERATE_BLOCK
 
 struct altcp_tls_config*
 	altcp_tls_create_config_client(const u8_t* ca, size_t ca_len)
 {
 	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, "->altcp_tls_create_config_client ca_len(%d)", (int)ca_len);
 	int ret;
+	err_msg = mem_calloc(100, sizeof(char));
 
 #ifdef DEBUG_WOLFSSL
 	wolfSSL_SetLoggingCb(ObkLoggingCallback);
@@ -69,12 +102,15 @@ struct altcp_tls_config*
 	}
 
 	/* List available cipher suites */
-	char ciphers[512]; 
+	char ciphers[1024];
+	memset(ciphers,0,1024);
 	ret = wolfSSL_get_ciphers(ciphers, (int)sizeof(ciphers));
-	if (ret == WOLFSSL_SUCCESS){
+	if (ret == WOLFSSL_SUCCESS) 
+	{
 		addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, "CIPHERS: %s", ciphers);
 	}
-
+	
+	
 	/* Add cert to ctx FOR TEST  */
 	// ca = test_cert;
 	// ca_len = sizeof(test_cert);
@@ -102,7 +138,7 @@ struct altcp_tls_config*
 		ret_decode = wolfSSL_CertPemToDer(ca, ca_len, cert_der_buf, cert_der_len, CERT_TYPE);
 		if (ret_decode <= 0)
 		{
-			addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, 
+			addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT,
 				" <-altcp_tls_create_config_client wolfSSL_CertPemToDer ret(%d)", ret_decode);
 			goto exit_cert_decode;
 		}
@@ -119,7 +155,7 @@ struct altcp_tls_config*
 
 		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "      Issuer: %s", decodedCert.issuer);
 		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "      Subject: %s", decodedCert.subject);
-		DNS_entry * altName = decodedCert.altNames;
+		DNS_entry* altName = decodedCert.altNames;
 		while (altName) {
 			addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "      Alt Name: %s", altName->name);
 			altName = altName->next;
@@ -134,7 +170,7 @@ struct altcp_tls_config*
 #endif
 	}
 	else {
-		/* Disable peer certificate validation for testing  */
+		/* Disable peer certificate validation for testing */
 		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, " <->altcp_tls_create_config_client Invalid cert. Disable cert validation");
 		wolfSSL_CTX_set_verify(conf->ctx, WOLFSSL_VERIFY_NONE, NULL);
 	}
@@ -227,7 +263,7 @@ static err_t
 altcp_wolfssl_connected(void* arg, struct altcp_pcb* inner_conn, err_t err)
 {
 	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, "->altcp_wolfssl_connected (%d)", err);
-	
+
 	int ret;
 	struct altcp_pcb* conn = (struct altcp_pcb*)arg;
 	LWIP_UNUSED_ARG(inner_conn);
@@ -275,7 +311,8 @@ static err_t connect_wolfssl_context(altcp_wolfssl_state* state)
 {
 	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, "->connect_wolfssl_context");
 	int ret, err_ssl;
-
+	
+	LWIP_ASSERT_CORE_LOCKED();
 	ret = wolfSSL_connect(state->ssl);
 	if (ret == WOLFSSL_SUCCESS)
 	{
@@ -303,27 +340,34 @@ static err_t connect_wolfssl_context(altcp_wolfssl_state* state)
 
 int altcp_wolfssl_bio_send(WOLFSSL* ssl, char* buf, int sz, void* ctx)
 {
-	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, "->altcp_wolfssl_bio_send sz(%d)", sz);
+	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, "->altcp_wolfssl_bio_send V1 sz(%d) heap(%d) %s", sz, xPortGetFreeHeapSize(), toHex(buf, sz));
 	err_t err;
 	int ret = 0;
-	struct altcp_pcb* out_pcb = (struct altcp_pcb*)ctx;
+	struct altcp_pcb* out_pcb;
 	LWIP_UNUSED_ARG(ssl);
 
-	if (!out_pcb || !buf || sz < 1)
+	if (!ctx || !buf || sz < 1)
 	{
-		addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, " <-altcp_wolfssl_bio_send error (!out_pcb || !buf || sz < 1)");
+		addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, " <-altcp_wolfssl_bio_send error (!ctx || !buf || sz < 1)");
 		return WOLFSSL_CBIO_ERR_GENERAL;
 	}
-	err = altcp_write(out_pcb->inner_conn, buf, sz, TCP_WRITE_FLAG_COPY);
+	out_pcb = (struct altcp_pcb*)ctx;
+	if (!out_pcb->inner_conn) {
+		addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, " <-altcp_wolfssl_bio_send error (!out_pcb->out_pcb->inner_conn)");
+		return WOLFSSL_CBIO_ERR_GENERAL;
+	}
+	LWIP_ASSERT_CORE_LOCKED();
+	err = altcp_write(out_pcb->inner_conn, buf, sz, TCP_WRITE_FLAG_MORE);
 	if (err == ERR_OK)
 	{
 		ret = sz;
-	} else 
+	}
+	else
 	{
-	 ret = WOLFSSL_CBIO_ERR_GENERAL;
+		ret = WOLFSSL_CBIO_ERR_GENERAL;
 	}
 
-	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, " <-altcp_wolfssl_bio_send ret(%d) sz(%d)", ret, sz);
+	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, " <-altcp_wolfssl_bio_send ret(%d) heap(%d) sz(%d)", ret, xPortGetFreeHeapSize(), sz);
 	return ret;
 }
 
@@ -358,7 +402,16 @@ int altcp_wolfssl_bio_recv(WOLFSSL* ssl, char* buf, int sz, void* ctx)
 		ret = pbuf_copy_partial(state->buf, buf, sz, state->pbuf_offset);
 		if (ret > 0)
 		{
+			//struct pbuf* head = state->buf;
 			state->buf = pbuf_skip(state->buf, (ret + state->pbuf_offset), &state->pbuf_offset);
+			/*
+			if (head != state->buf){
+				addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, " <-altcp_wolfssl_bio_recv buf read (%d) heap(%d)", ret, xPortGetFreeHeapSize());
+				pbuf_free(head);
+				addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, " <-altcp_wolfssl_bio_recv buf free (%d) heap(%d)", head->len, xPortGetFreeHeapSize());
+				head = NULL;
+			}
+			*/
 		}
 	}
 	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, " <-altcp_wolfssl_bio_recv (%d)/(%d)", ret, sz);
@@ -409,10 +462,10 @@ static err_t altcp_wolfssl_lower_recv(void* cb, struct altcp_pcb* pcb, struct pb
 		ret = connect_wolfssl_context(state);
 		altcp_recved(pcb, p->tot_len);
 		/* Abort on error*/
-		if (ret != ERR_OK){
+		if (ret != ERR_OK) {
 			addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, " <-altcp_wolfssl_lower_recv abort connect_wolfssl_context (%d)", ret);
 			altcp_abort(pcb);
-			return ret;			
+			return ret;
 		}
 		/* upper connected is called when handshake is done*/
 		if (out_pcb->connected && ret == ERR_OK && state->connected)
@@ -438,7 +491,7 @@ static err_t altcp_wolfssl_lower_recv(void* cb, struct altcp_pcb* pcb, struct pb
 				else
 				{
 #ifdef NO_ERROR_STRINGS
-					addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT, 
+					addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT,
 						" <-altcp_wolfssl_lower_recv wolfSSL_read error ret(%d) ssl_err(%d)");
 #else
 					addLogAdv(LOG_ERROR, LOG_FEATURE_MQTT,
@@ -636,7 +689,7 @@ altcp_wolfssl_close(struct altcp_pcb* conn)
 static void
 altcp_wolfssl_dealloc(struct altcp_pcb* conn)
 {
-	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, "->altcp_wolfssl_dealloc");	
+	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, "->altcp_wolfssl_dealloc");
 	/* clean up and free tls state */
 	if (conn)
 	{
@@ -655,7 +708,7 @@ void altcp_wolfssl_free(struct altcp_tls_config* conf, struct altcp_pcb* conn)
 	addLogAdv(LOG_WARN, LOG_FEATURE_MQTT, "->altcp_wolfssl_free conf(%d) conn(%d)", conf, conn);
 
 	if (conn) {
-		if (conn->state){
+		if (conn->state) {
 			altcp_wolfssl_state* state = conn->state;
 			if (state->buf) {
 				pbuf_free(state->buf);

@@ -56,6 +56,7 @@ extern "C" {
 	static void altcp_wolfssl_abort(struct altcp_pcb* conn);
 	static void altcp_wolfssl_dealloc(struct altcp_pcb* conn);
 	void altcp_wolfssl_free(struct altcp_tls_config* conf, struct altcp_pcb* conn);
+	int wolfssl_custom_random(unsigned char* output, unsigned int);
 
 	const struct altcp_functions altcp_wolfssl_functions = {
 		altcp_wolfssl_set_poll,
