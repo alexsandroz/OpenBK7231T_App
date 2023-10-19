@@ -1225,6 +1225,13 @@ static int MQTT_do_connect(mqtt_client_t* client)
 			mqtt_connection_cb, LWIP_CONST_CAST(void*, &mqtt_client_info),
 			&mqtt_client_info);
 		UNLOCK_TCPIP_CORE();
+
+		/* Para teste. set no TLS apos tentar connectar uma vez*/
+		CFG_SetMQTTUseTls(false);
+		CFG_SetMQTTPort(1883);
+		CFG_Save_SetupTimer();
+
+
 		mqtt_connect_result = res;
 		if (res != ERR_OK)
 		{

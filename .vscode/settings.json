@@ -1,6 +1,6 @@
 {
 	"editor.formatOnPaste": true,
-	"editor.formatOnSave": true,
+	"editor.formatOnSave": false,
 	"C_Cpp.formatting": "vcFormat",
 	"C_Cpp.codeAnalysis.runAutomatically": false,
 	"C_Cpp.clang_format_style": "{ BasedOnStyle: LLVM, UseTab: Always, IndentWidth: 4, TabWidth: 4, BreakBeforeBraces: Attach, AllowShortIfStatementsOnASingleLine: false, IndentCaseLabels: false, ColumnLimit: 0, AccessModifierOffset: -4, NamespaceIndentation: All, FixNamespaceComments: false }",
@@ -15,5 +15,22 @@
 	"C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: LLVM, UseTab: Always, IndentWidth: 4, TabWidth: 4, BreakBeforeBraces: Attach, AllowShortIfStatementsOnASingleLine: false, IndentCaseLabels: false, ColumnLimit: 0, AccessModifierOffset: -4, NamespaceIndentation: All, FixNamespaceComments: false }",
 	"prettier.tabWidth": 4,
 	"prettier.useTabs": true,
-	"prettier.printWidth": 120
+	"prettier.printWidth": 120,
+	"files.associations": {
+		"time.h": "c",
+		"altcp_tls_wolfssl.h": "c",
+		"drv_tuyamcu.h": "c",
+		"hal_wifi.h": "c",
+		"cmd_public.h": "c",
+		"new_mqtt.h": "c",
+		"timeouts.h": "c",
+		"mqtt.h": "c",
+		"tcpip.h": "c",
+		"cstddef": "cpp",
+		"functional": "cpp",
+		"opt.h": "c",
+		"cstdarg": "c",
+		"sstream": "c",
+		"regex": "c"
+	}
 }
