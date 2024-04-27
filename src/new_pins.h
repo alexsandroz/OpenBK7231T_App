@@ -1046,8 +1046,10 @@ typedef struct pinsState_s {
 #define OBK_FLAG_HTTP_DISABLE_AUTH_IN_SAFE_MODE		44
 #define OBK_FLAG_DISCOVERY_DONT_MERGE_LIGHTS		45
 #define OBK_FLAG_TUYAMCU_STORE_RAW_DATA				46
+#define OBK_FLAG_TUYAMCU_STORE_ALL_DATA				47
+#define OBK_FLAG_POWER_INVERT_AC					48
 
-#define OBK_TOTAL_FLAGS 47
+#define OBK_TOTAL_FLAGS 49
 
 #define LOGGER_FLAG_MQTT_DEDUPER					1
 #define LOGGER_FLAG_POWER_SAVE						2
@@ -1304,6 +1306,7 @@ bool CHANNEL_IsInUse(int ch);
 void Channel_SaveInFlashIfNeeded(int ch);
 int CHANNEL_FindMaxValueForChannel(int ch);
 // cmd_channels.c
+bool CHANNEL_HasLabel(int ch);
 const char* CHANNEL_GetLabel(int ch);
 bool CHANNEL_ShouldAddTogglePrefixToUI(int ch);
 bool CHANNEL_HasNeverPublishFlag(int ch);

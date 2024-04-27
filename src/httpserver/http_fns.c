@@ -771,7 +771,8 @@ int http_fn_index(http_request_t* request) {
 	}
 	if (Main_HasWiFiConnected())
 	{
-		hprintf255(request, "<h5>Wifi RSSI: %s (%idBm)</h5>", str_rssi[wifi_rssi_scale(HAL_GetWifiStrength())], HAL_GetWifiStrength());
+		int rssi = HAL_GetWifiStrength();
+		hprintf255(request, "<h5>Wifi RSSI: %s (%idBm)</h5>", str_rssi[wifi_rssi_scale(rssi)], rssi);
 	}
 #if PLATFORM_BEKEN
 	/*
@@ -811,6 +812,19 @@ typedef enum {
 	char reason[26];
 	bl_sys_rstinfo_getsting(reason);
 	hprintf255(request, "<h5>Reboot reason: %s</h5>", reason);
+#elif PLATFORM_LN882H
+	// type is chip_reboot_cause_t
+	g_rebootReason = ln_chip_get_reboot_cause();
+	{
+		const char* s = "Unk";
+		if (g_rebootReason == 0)
+			s = "Pwr";
+		else if (g_rebootReason == 1)
+			s = "Soft";
+		else if (g_rebootReason == 2)
+			s = "Wdt";
+		hprintf255(request, "<h5>Reboot reason: %i - %s</h5>", g_rebootReason, s);
+	}
 #endif
 	if (CFG_GetMQTTHost()[0] == 0) {
 		hprintf255(request, "<h5>MQTT State: not configured<br>");
@@ -915,7 +929,7 @@ typedef enum {
 int http_fn_about(http_request_t* request) {
 	http_setup(request, httpMimeTypeHTML);
 	http_html_start(request, "About");
-	poststr_h2(request, "Open source firmware for BK7231N, BK7231T, XR809 and BL602 by OpenSHWProjects");
+	poststr_h2(request, "Open source firmware for BK7231N, BK7231T, T34, BL2028N, XR809, W600/W601, W800/W801, BL602, LF686 and LN882H by OpenSHWProjects");
 	poststr(request, htmlFooterReturnToMainPage);
 	http_html_end(request);
 	poststr(request, NULL);
@@ -1577,6 +1591,7 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 	int relayCount;
 	int pwmCount;
 	int dInputCount;
+	int excludedCount = 0;
 	bool ledDriverChipRunning;
 	HassDeviceInfo* dev_info = NULL;
 	bool measuringPower = false;
@@ -1592,6 +1607,13 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 	// no channels published yet
 	flagsChannelPublished = 0;
 
+	for (i = 0; i < CHANNEL_MAX; i++) {
+		if (CHANNEL_HasNeverPublishFlag(i)) {
+			BIT_SET(flagsChannelPublished, i);
+			excludedCount++;
+		}
+	}
+	
 	if (topic == 0 || *topic == 0) {
 		topic = "homeassistant";
 	}
@@ -1602,7 +1624,7 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 #endif
 
 	PIN_get_Relay_PWM_Count(&relayCount, &pwmCount, &dInputCount);
-	addLogAdv(LOG_INFO, LOG_FEATURE_HTTP, "HASS counts: %i rels, %i pwms, %i inps", relayCount, pwmCount, dInputCount);
+	addLogAdv(LOG_INFO, LOG_FEATURE_HTTP, "HASS counts: %i rels, %i pwms, %i inps, %i excluded", relayCount, pwmCount, dInputCount, excludedCount);
 
 	ledDriverChipRunning = LED_IsLedDriverChipRunning();
 
@@ -1739,7 +1761,7 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 
 #ifndef OBK_DISABLE_ALL_DRIVERS
 	if (measuringPower == true) {
-		for (i = OBK__FIRST; i < OBK__LAST; i++)
+		for (i = OBK__FIRST; i <= OBK__LAST; i++)
 		{
 			dev_info = hass_init_energy_sensor_device_info(i);
 			if (dev_info) {
@@ -2047,10 +2069,14 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 	}
 #endif
 	if (1) {
-		dev_info = hass_init_sensor_device_info(HASS_RSSI, 0, -1, -1, 1);
+		//use -1 for channel as these don't correspond to channels
+		dev_info = hass_init_sensor_device_info(HASS_RSSI, -1, -1, -1, 1);
 		MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
 		hass_free_device_info(dev_info);
-		dev_info = hass_init_sensor_device_info(HASS_UPTIME, 0, -1, -1, 1);
+		dev_info = hass_init_sensor_device_info(HASS_UPTIME, -1, -1, -1, 1);
+		MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+		hass_free_device_info(dev_info);
+		dev_info = hass_init_sensor_device_info(HASS_BUILD, -1, -1, -1, 1);
 		MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
 		hass_free_device_info(dev_info);
 		discoveryQueued = true;
@@ -2582,10 +2608,12 @@ const char* g_obk_flagNames[] = {
 	"[HTTP] Disable authentication in safe mode (not recommended)",
 	"[MQTT Discovery] Don't merge toggles and dimmers into lights",
 	"[TuyaMCU] Store raw data",
+	"[TuyaMCU] Store ALL data",
+	"[PWR] Invert AC dir",
+	"error",
 	"error",
 	"error",
 }; 
-
 int http_fn_cfg_generic(http_request_t* request) {
 	int i;
 	char tmpA[64];
