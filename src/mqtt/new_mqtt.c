@@ -2372,6 +2372,7 @@ int mbedtls_hardclock_poll(void* data, unsigned char* output, size_t len, size_t
 #endif  //MBEDTLS_ENTROPY_HARDWARE_ALT
 
 #ifdef MBEDTLS_PLATFORM_GMTIME_R_ALT
+static bool log_gmtime_alt = true;
 struct tm* cvt_date(char const* date, char const* time, struct tm* t);
 struct tm* cvt_date(char const* date, char const* time, struct tm* t)
 {
@@ -2390,8 +2391,11 @@ struct tm* mbedtls_platform_gmtime_r(const mbedtls_time_t* tt, struct tm* tm_buf
 	struct tm* ltm;
 	if (!NTP_IsTimeSynced()) {	
 		ltm = cvt_date(__DATE__, __TIME__, tm_buf);
-		//addLogAdv(LOG_INFO, LOG_FEATURE_NTP, "MBEDTLS Time : %04d/%02d/%02d %02d:%02d:%02d",
-		//	ltm->tm_year + 1900, ltm->tm_mon + 1, ltm->tm_mday, ltm->tm_hour, ltm->tm_min, ltm->tm_sec);
+		if (log_gmtime_alt) {
+			addLogAdv(LOG_INFO, LOG_FEATURE_NTP, "MBEDTLS: NTP not synchronized. Using compile time: %04d/%02d/%02d %02d:%02d:%02d",
+				ltm->tm_year + 1900, ltm->tm_mon + 1, ltm->tm_mday, ltm->tm_hour, ltm->tm_min, ltm->tm_sec);
+			log_gmtime_alt = false; 
+		}			
 		return ltm;
 	}
 	return gmtime_r((time_t*)&g_ntpTime, tm_buf);
