@@ -78,7 +78,7 @@ void DoorDeepSleep_OnEverySecond() {
 					g_cfg.pins.roles[i] == IOR_DoorSensorWithDeepSleep_pd) {
 					sprintf(tmp, "%i", g_cfg.pins.channels[i]);
 					bValue = BIT_CHECK(g_initialPinStates, i);
-					MQTT_PublishMain_StringInt(tmp,bValue, 0);
+					MQTT_PublishMain_StringInt(tmp,bValue, OBK_PUBLISH_FLAG_RETAIN);
 				}
 			}
 			g_initialStateSent++;
@@ -87,7 +87,7 @@ void DoorDeepSleep_OnEverySecond() {
 				if (g_cfg.pins.roles[i] == IOR_DoorSensorWithDeepSleep ||
 					g_cfg.pins.roles[i] == IOR_DoorSensorWithDeepSleep_NoPup ||
 					g_cfg.pins.roles[i] == IOR_DoorSensorWithDeepSleep_pd) {
-					MQTT_ChannelPublish(g_cfg.pins.channels[i], 0);
+					MQTT_ChannelPublish(g_cfg.pins.channels[i], OBK_PUBLISH_FLAG_RETAIN);
 				}
 			}
 		}
