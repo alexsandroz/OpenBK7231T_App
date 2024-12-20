@@ -126,6 +126,8 @@ enum EventCode {
 	CMD_EVENT_CUSTOM_DOWN,
 	CMD_EVENT_CUSTOM_UP,
 
+	CMD_EVENT_MISSEDHEARTBEATS,
+
 	// must be lower than 256
 	CMD_EVENT_MAX_TYPES
 };
@@ -150,6 +152,7 @@ enum LightMode {
 	Light_Temperature,
 	Light_RGB,
 	Light_All,
+	Light_Anim,
 };
 
 #define TOKENIZER_ALLOW_QUOTES					1
@@ -159,6 +162,7 @@ enum LightMode {
 // force single argument mode
 #define TOKENIZER_FORCE_SINGLE_ARGUMENT_MODE	8
 #define TOKENIZER_ALLOW_ESCAPING_QUOTATIONS		16
+#define TOKENIZER_EXPAND_EARLY					32
 
 // cmd_tokenizer.c
 int Tokenizer_GetArgsCount();
@@ -176,6 +180,7 @@ void Tokenizer_TokenizeString(const char* s, int flags);
 void RepeatingEvents_Init();
 void RepeatingEvents_RunUpdate(float deltaTimeSeconds);
 void SIM_GenerateRepeatingEventsDesc(char *o, int outLen);
+void SIM_GeneratePowerStateDesc(char *o, int outLen);
 // cmd_eventHandlers.c
 void EventHandlers_Init();
 // This is useful to fire an event when a certain UART string command is received.
@@ -206,10 +211,12 @@ void LED_SetTemperature(int tmpInteger, bool bApply);
 float LED_GetTemperature0to1Range();
 void LED_SetTemperature0to1Range(float f);
 void LED_SetDimmer(int iVal);
+void LED_SetDimmerIfChanged(int iVal);
 void LED_SetDimmerForDisplayOnly(int iVal);
 commandResult_t LED_SetBaseColor(const void* context, const char* cmd, const char* args, int bAll);
 void LED_SetFinalCW(byte c, byte w);
 void LED_SetFinalRGB(byte r, byte g, byte b);
+void LED_SetFinalRGBW(byte r, byte g, byte b, byte w);
 void LED_SetFinalRGBCW(byte* rgbcw);
 void LED_GetFinalChannels100(byte* rgbcw);
 void LED_GetTasmotaHSV(int* hsv);
@@ -232,6 +239,9 @@ float LED_GetSaturation();
 float LED_GetGreen255();
 float LED_GetRed255();
 float LED_GetBlue255();
+extern float led_baseColors[5];
+extern byte g_lightEnableAll;
+extern byte g_lightMode;
 void LED_RunQuickColorLerp(int deltaMS);
 void LED_RunOnEverySecond();
 OBK_Publish_Result sendFinalColor();

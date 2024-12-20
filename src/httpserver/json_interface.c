@@ -21,6 +21,8 @@
 #include "../driver/drv_local.h"
 #include "../driver/drv_bl_shared.h"
 
+#if ENABLE_TASMOTA_JSON
+
 void JSON_PrintKeyValue_String(void* request, jsonCb_t printer, const char* key, const char* value, bool bComma) {
 	printer(request, "\"%s\":\"%s\"", key, value);
 	if (bComma) {
@@ -192,7 +194,7 @@ static int http_tasmota_json_power(void* request, jsonCb_t printer) {
 /*
 {"StatusSNS":{"Time":"2022-07-30T10:11:26","ENERGY":{"TotalStartTime":"2022-05-12T10:56:31","Total":0.003,"Yesterday":0.003,"Today":0.000,"Power": 0,"ApparentPower": 0,"ReactivePower": 0,"Factor":0.00,"Voltage":236,"Current":0.000}}}
 */
-
+#ifdef ENABLE_DRIVER_BL0937
 // returns NaN values as 0
 static float _getReading_NanToZero(energySensor_t type) {
 	float retval = DRV_GetReading(type);
@@ -229,7 +231,7 @@ static int http_tasmota_json_ENERGY(void* request, jsonCb_t printer) {
 	}
 	return 0;
 }
-
+#endif	// ENABLE_DRIVER_BL0937
 // Topic: tele/tasmota_48E7F3/SENSOR at 3:06 AM:
 // Sample:
 /*
@@ -271,8 +273,8 @@ static int http_tasmota_json_SENSOR(void* request, jsonCb_t printer) {
 		// close ENERGY block
 		printer(request, "},");
 	}
-	if (DRV_IsRunning("CHT8305")) {
-		g_pin_1 = PIN_FindPinIndexForRole(IOR_CHT8305_DAT, g_pin_1);
+	if (DRV_IsRunning("CHT83XX")) {
+		g_pin_1 = PIN_FindPinIndexForRole(IOR_CHT83XX_DAT, g_pin_1);
 		channel_1 = g_cfg.pins.channels[g_pin_1];
 		channel_2 = g_cfg.pins.channels2[g_pin_1];
 
@@ -280,7 +282,27 @@ static int http_tasmota_json_SENSOR(void* request, jsonCb_t printer) {
 		chan_val2 = CHANNEL_GetFloat(channel_2);
 
 		// writer header
-		printer(request, "\"CHT8305\":");
+		printer(request, "\"CHT83XX\":");
+		// following check will clear NaN values
+		printer(request, "{");
+		printer(request, "\"Temperature\": %.1f,", chan_val1);
+		printer(request, "\"Humidity\": %.0f", chan_val2);
+		// close ENERGY block
+		printer(request, "},");
+	}
+	for (int i = 0; i < PLATFORM_GPIO_MAX; i++) {
+		int role = PIN_GetPinRoleForPinIndex(i);
+		if (role != IOR_DHT11 && role != IOR_DHT12 && role != IOR_DHT21 && role != IOR_DHT22)
+			continue;
+		channel_1 = g_cfg.pins.channels[i];
+		channel_2 = g_cfg.pins.channels2[i];
+
+		chan_val1 = CHANNEL_GetFloat(channel_1) / 10.0f;
+		chan_val2 = CHANNEL_GetFloat(channel_2);
+
+		// writer header
+		// TODO - index?
+		printer(request, "\"DHT\":");
 		// following check will clear NaN values
 		printer(request, "{");
 		printer(request, "\"Temperature\": %.1f,", chan_val1);
@@ -312,6 +334,11 @@ static int http_tasmota_json_SENSOR(void* request, jsonCb_t printer) {
 /*
 {"StatusSNS":{"Time":"2023-04-10T10:19:55"}}
 */
+static void format_date(char *buffer, int buflength, struct tm *ltm)
+{
+	snprintf(buffer, buflength, "%04d-%02d-%02dT%02d:%02d:%02d",ltm->tm_year+1900, ltm->tm_mon+1, ltm->tm_mday, ltm->tm_hour, ltm->tm_min, ltm->tm_sec);
+}
+
 static int http_tasmota_json_status_SNS(void* request, jsonCb_t printer, bool bAppendHeader) {
 	char buff[20];
 
@@ -321,11 +348,11 @@ static int http_tasmota_json_status_SNS(void* request, jsonCb_t printer, bool bA
 	printer(request, "{");
 
 	time_t localTime = (time_t)NTP_GetCurrentTime();
-	strftime(buff, sizeof(buff), "%Y-%m-%dT%H:%M:%S", gmtime(&localTime));
+	format_date(buff, sizeof(buff), gmtime(&localTime));
 	JSON_PrintKeyValue_String(request, printer, "Time", buff, false);
 
 #ifndef OBK_DISABLE_ALL_DRIVERS
-
+#ifdef ENABLE_DRIVER_BL0937
 	if (DRV_IsMeasuringPower() || DRV_IsMeasuringBattery()) {
 
 		// begin ENERGY block
@@ -333,7 +360,16 @@ static int http_tasmota_json_status_SNS(void* request, jsonCb_t printer, bool bA
 		printer(request, "\"ENERGY\":");
 		http_tasmota_json_ENERGY(request, printer);
 	}
-	if (DRV_IsSensor()) {
+#endif	// ENABLE_DRIVER_BL0937
+	bool bHasAnyDHT = false;
+	for (int i = 0; i < PLATFORM_GPIO_MAX; i++) {
+		int role = PIN_GetPinRoleForPinIndex(i);
+		if (role != IOR_DHT11 && role != IOR_DHT12 && role != IOR_DHT21 && role != IOR_DHT22)
+			continue;
+		bHasAnyDHT = true;
+		break;
+	}
+	if (DRV_IsSensor() || bHasAnyDHT) {
 		http_tasmota_json_SENSOR(request, printer);
 		JSON_PrintKeyValue_String(request, printer, "TempUnit", "C", false);
 	}
@@ -402,7 +438,7 @@ static int http_tasmota_json_status_STS(void* request, jsonCb_t printer, bool bA
 		printer(request, "\"StatusSTS\":");
 	}
 	printer(request, "{");
-	strftime(buff, sizeof(buff), "%Y-%m-%dT%H:%M:%S", gmtime(&localTime));
+	format_date(buff, sizeof(buff), gmtime(&localTime));
 	JSON_PrintKeyValue_String(request, printer, "Time", buff, true);
 	format_time(g_secondsElapsed, buff, sizeof(buff));
 	JSON_PrintKeyValue_String(request, printer, "Uptime", buff, true);
@@ -440,9 +476,9 @@ static int http_tasmota_json_status_TIM(void* request, jsonCb_t printer) {
 	time_t localTime = (time_t)NTP_GetCurrentTime();
 	time_t localUTC = (time_t)NTP_GetCurrentTimeWithoutOffset();
 	printer(request, "\"StatusTIM\":{");
-	strftime(buff, sizeof(buff), "%Y-%m-%dT%H:%M:%S", gmtime(&localUTC));
+	format_date(buff, sizeof(buff), gmtime(&localUTC));
 	JSON_PrintKeyValue_String(request, printer, "UTC", buff, true);
-	strftime(buff, sizeof(buff), "%Y-%m-%dT%H:%M:%S", gmtime(&localTime));
+	format_date(buff, sizeof(buff), gmtime(&localTime));
 	JSON_PrintKeyValue_String(request, printer, "Local", buff, true);
 	JSON_PrintKeyValue_String(request, printer, "StartDST", "2022-03-27T02:00:00", true);
 	JSON_PrintKeyValue_String(request, printer, "EndDST", "2022-10-30T03:00:00", true);
@@ -469,14 +505,14 @@ static int http_tasmota_json_status_FWR(void* request, jsonCb_t printer) {
 	printer(request, "}");
 	return 0;
 }
-static int http_obk_json_channels(void* request, jsonCb_t printer) {
+static int http_obk_json_channels(void* request, jsonCb_t printer, int includeIndex) {
 	int i;
 	int iCnt = 0;
 	char tmp[8];
 
 	printer(request, "{");
 	for (i = 0; i < CHANNEL_MAX; i++) {
-		if (CHANNEL_IsInUse(i)) {
+		if (CHANNEL_IsInUse(i) || i == includeIndex) {
 			if (iCnt) {
 				printer(request, ",");
 			}
@@ -517,7 +553,7 @@ static int http_tasmota_json_status_MEM(void* request, jsonCb_t printer) {
 }
 // Test command: http://192.168.0.159/cm?cmnd=STATUS%205
 static int http_tasmota_json_status_NET(void* request, jsonCb_t printer) {
-	char tmpStr[16];
+	char tmpStr[19];	// will be used for MAC string 6*3 chars (18 would be o.k, since last hex has no ":" ...)
 	HAL_GetMACStr(tmpStr);
 
 	printer(request, "\"StatusNET\":{");
@@ -1021,7 +1057,11 @@ int JSON_ProcessCommandReply(const char* cmd, const char* arg, void* request, js
 		printer(request, "}");
 	}
 	else if (!wal_strnicmp(cmd, "Ch", 2)) {
-		http_obk_json_channels(request, printer);
+		int includeIndex = -1;
+		if (cmd[2]) {
+			includeIndex = atoi(cmd + 2);
+		}
+		http_obk_json_channels(request, printer, includeIndex);
 	}
 #ifndef OBK_DISABLE_ALL_DRIVERS
 #if ENABLE_DRIVER_TUYAMCU
@@ -1044,6 +1084,8 @@ int JSON_ProcessCommandReply(const char* cmd, const char* arg, void* request, js
 
 	return 0;
 }
+// close for ENABLE_TASMOTA_JSON
+#endif
 
 
 

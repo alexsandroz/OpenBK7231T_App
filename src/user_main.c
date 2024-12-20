@@ -58,8 +58,9 @@ void bg_register_irda_check_func(FUNCPTR func);
 #elif PLATFORM_LN882H
 #include "hal/hal_wdt.h"
 #include "hal/hal_gpio.h"
+#elif PLATFORM_ESPIDF
+#include "esp_timer.h"
 #endif
-
 
 int g_secondsElapsed = 0;
 // open access point after this number of seconds
@@ -203,7 +204,7 @@ void extended_app_waiting_for_launch2(void) {
 #endif
 
 
-#if defined(PLATFORM_LN882H)
+#if defined(PLATFORM_LN882H) || defined(PLATFORM_ESPIDF)
 
 int LWIP_GetMaxSockets() {
 	return 0;
@@ -213,9 +214,7 @@ int LWIP_GetActiveSockets() {
 }
 #endif
 
-#if defined(PLATFORM_BL602) || defined(PLATFORM_W800) || defined(PLATFORM_W600)|| defined(PLATFORM_LN882H)
-
-
+#if defined(PLATFORM_BL602) || defined(PLATFORM_W800) || defined(PLATFORM_W600) || defined(PLATFORM_LN882H) || defined(PLATFORM_ESPIDF) || defined(PLATFORM_TR6260)
 
 OSStatus rtos_create_thread(beken_thread_t* thread,
 	uint8_t priority, const char* name,
@@ -249,10 +248,20 @@ OSStatus rtos_create_thread(beken_thread_t* thread,
 }
 
 OSStatus rtos_delete_thread(beken_thread_t* thread) {
-	vTaskDelete(thread);
+	if(thread == NULL) vTaskDelete(thread);
+	else vTaskDelete(*thread);
 	return kNoErr;
 }
+
+OSStatus rtos_suspend_thread(beken_thread_t* thread)
+{
+	if(thread == NULL) vTaskSuspend(thread);
+	else vTaskSuspend(*thread);
+	return kNoErr;
+}
+
 #endif
+
 void MAIN_ScheduleUnsafeInit(int delSeconds) {
 	g_doUnsafeInitIn = delSeconds;
 }
@@ -283,6 +292,69 @@ void ScheduleDriverStart(const char* name, int delay) {
 	}
 }
 
+#if defined(PLATFORM_LN882H)
+// LN882H hack, maybe place somewhere else?
+// this will be applied after WiFi connect
+extern int g_ln882h_pendingPowerSaveCommand;
+void LN882H_ApplyPowerSave(int bOn);
+#endif
+
+// SSID switcher by xjikka 20240525
+#if ALLOW_SSID2
+#define SSID_USE_SSID1  0
+#define SSID_USE_SSID2  1
+static int g_SSIDactual = SSID_USE_SSID1;       // -1 not initialized,  0=SSID1 1=SSID2
+static int g_SSIDSwitchAfterTry = 3;// switch to opposite SSID after
+static int g_SSIDSwitchCnt = 0;     // switch counter
+#endif
+
+void CheckForSSID12_Switch() {
+#if ALLOW_SSID2
+	// nothing to do if SSID2 is unset 
+	if (CFG_GetWiFiSSID2()[0] == 0) return;
+	if (g_SSIDSwitchCnt++ < g_SSIDSwitchAfterTry) {
+		ADDLOGF_INFO("WiFi SSID: waiting for SSID switch %d/%d (using SSID%d)\r\n", g_SSIDSwitchCnt, g_SSIDSwitchAfterTry, g_SSIDactual+1);
+		return;
+	}
+	g_SSIDSwitchCnt = 0;
+	g_SSIDactual ^= 1;	// toggle SSID 
+	ADDLOGF_INFO("WiFi SSID: switching to SSID%i\r\n", g_SSIDactual + 1);
+#endif
+}
+
+//20241125 XJIKKA Init last stored SSID from RetailChannel if set
+//Note that it must be set in early.bat using CMD_setStartupSSIDChannel
+void Init_WiFiSSIDactual_FromChannelIfSet(void) {
+#if ALLOW_SSID2
+	g_SSIDactual = FV_GetStartupSSID_StoredValue(SSID_USE_SSID1);
+#endif
+}
+const char* CFG_GetWiFiSSIDX() {
+#if ALLOW_SSID2
+	if (g_SSIDactual) {
+		return CFG_GetWiFiSSID2();
+	}
+	else {
+		return CFG_GetWiFiSSID();
+	}
+#else
+	return CFG_GetWiFiSSID();
+#endif
+}
+
+const char* CFG_GetWiFiPassX() {
+#if ALLOW_SSID2
+	if (g_SSIDactual) {
+		return CFG_GetWiFiPass2();
+	}
+	else {
+		return CFG_GetWiFiPass();
+	}
+#else
+	return CFG_GetWiFiPass();
+#endif
+}
+
 void Main_OnWiFiStatusChange(int code)
 {
 	// careful what you do in here.
@@ -307,12 +379,25 @@ void Main_OnWiFiStatusChange(int code)
 		break;
 	case WIFI_STA_AUTH_FAILED:
 		// try to connect again in few seconds
-		g_connectToWiFi = 60;
+		// for me first auth will often fail, so retry more aggressively during startup
+		// the maximum of 6 tries during first 30 seconds should be acceptable
+		if (g_secondsElapsed < 30) {
+			g_connectToWiFi = 5;
+		}
+		else {
+			g_connectToWiFi = 60;
+		}
 		g_bHasWiFiConnected = 0;
 		ADDLOGF_INFO("Main_OnWiFiStatusChange - WIFI_STA_AUTH_FAILED - %i\r\n", code);
 		break;
 	case WIFI_STA_CONNECTED:
+#if ALLOW_SSID2
+		if (!g_bHasWiFiConnected) FV_UpdateStartupSSIDIfChanged_StoredValue(g_SSIDactual);	//update ony on first connect
+#endif
 		g_bHasWiFiConnected = 1;
+#if ALLOW_SSID2
+		g_SSIDSwitchCnt = 0;
+#endif
 		ADDLOGF_INFO("Main_OnWiFiStatusChange - WIFI_STA_CONNECTED - %i\r\n", code);
 
 		if (bSafeMode == 0) {
@@ -326,7 +411,15 @@ void Main_OnWiFiStatusChange(int code)
 				//DRV_SSDP_Restart(); // this kills things
 			}
 		}
-
+#if defined(PLATFORM_LN882H)
+		// LN882H hack, maybe place somewhere else?
+		// this will be applied only if WiFi is connected
+		if (g_ln882h_pendingPowerSaveCommand != -1) {
+			ADDLOG_INFO(LOG_FEATURE_CMD, "CMD_PowerSave: applying delayed setting. PowerSave will set to %i", g_ln882h_pendingPowerSaveCommand);
+			LN882H_ApplyPowerSave(g_ln882h_pendingPowerSaveCommand);
+			g_ln882h_pendingPowerSaveCommand = -1;
+		}
+#endif
 		break;
 		/* for softap mode */
 	case WIFI_AP_CONNECTED:
@@ -428,13 +521,19 @@ void Main_ConnectToWiFiNow() {
 	const char* wifi_ssid, * wifi_pass;
 
 	g_bOpenAccessPointMode = 0;
-	wifi_ssid = CFG_GetWiFiSSID();
-	wifi_pass = CFG_GetWiFiPass();
-	HAL_ConnectToWiFi(wifi_ssid, wifi_pass,&g_cfg.staticIP);
-	// register function to get callbacks about wifi changes.
+	CheckForSSID12_Switch();
+	wifi_ssid = CFG_GetWiFiSSIDX();
+	wifi_pass = CFG_GetWiFiPassX();
+	// register function to get callbacks about wifi changes .. 
+	// ... but do it, before calling HAL_ConnectToWiFi(), 
+	// otherwise callbacks are not possible (e.g. WIFI_STA_CONNECTING can never be called )!!
 	HAL_WiFi_SetupStatusCallback(Main_OnWiFiStatusChange);
-	ADDLOGF_DEBUG("Registered for wifi changes\r\n");
-	g_connectToWiFi = 0;
+	ADDLOGF_INFO("Registered for wifi changes\r\n");
+	ADDLOGF_INFO("Connecting to SSID [%s]\r\n", wifi_ssid);
+	HAL_ConnectToWiFi(wifi_ssid, wifi_pass, &g_cfg.staticIP);
+	// don't set g_connectToWiFi = 0; here!
+	// this would overwrite any changes, e.g. from Main_OnWiFiStatusChange !
+	// so don't do this here, but e.g. set in Main_OnWiFiStatusChange if connected!!!
 }
 bool Main_HasFastConnect() {
 	if (g_bootFailures > 2)
@@ -449,7 +548,7 @@ bool Main_HasFastConnect() {
 	}
 	return false;
 }
-#if PLATFORM_LN882H
+#if PLATFORM_LN882H || PLATFORM_ESPIDF
 // Quick hack to display LN-only temperature,
 // we may improve it in the future
 extern float g_wifi_temperature;
@@ -476,14 +575,16 @@ void Main_OnEverySecond()
 		UINT32 temperature;
 		temp_single_get_current_temperature(&temperature);
 #if PLATFORM_BK7231T
-		g_wifi_temperature = temperature / 25.0f;
+		g_wifi_temperature = 2.21f * (temperature / 25.0f) - 65.91f;
 #else
-		g_wifi_temperature = temperature * 0.128f;
+		g_wifi_temperature = (-0.457f * temperature) + 188.474f;
 #endif
 #elif PLATFORM_BL602
 		get_tsen_adc(&g_wifi_temperature, 0);
 #elif PLATFORM_LN882H
 		// this is set externally, I am just leaving comment here
+#elif PLATFORM_W800 || PLATFORM_W600
+		g_wifi_temperature = HAL_ADC_Temp();
 #endif
 	}
 	// run_adc_test();
@@ -517,7 +618,7 @@ void Main_OnEverySecond()
 	LED_RunOnEverySecond();
 #ifndef OBK_DISABLE_ALL_DRIVERS
 	DRV_OnEverySecond();
-#if defined(PLATFORM_BEKEN) || defined(WINDOWS) || defined(PLATFORM_BL602)
+#if defined(PLATFORM_BEKEN) || defined(WINDOWS) || defined(PLATFORM_BL602) || defined(PLATFORM_ESPIDF)
 	UART_RunEverySecond();
 #endif
 #endif
@@ -726,6 +827,7 @@ void Main_OnEverySecond()
 				}
 			}
 		}
+
 	}
 	if (g_connectToWiFi)
 	{
@@ -755,7 +857,7 @@ void Main_OnEverySecond()
 		if (!g_reset) {
 			// ensure any config changes are saved before reboot.
 			CFG_Save_IfThereArePendingChanges();
-#ifndef OBK_DISABLE_ALL_DRIVERS
+#ifdef ENABLE_DRIVER_BL0937
 			if (DRV_IsMeasuringPower())
 			{
 				BL09XX_SaveEmeteringStatistics();
@@ -827,6 +929,8 @@ void QuickTick(void* param)
 
 #if defined(PLATFORM_BEKEN) || defined(WINDOWS)
 	g_time = rtos_get_time();
+#elif defined (PLATFORM_ESPIDF)
+	g_time = esp_timer_get_time() / 1000;
 #else
 	g_time += QUICK_TMR_DURATION;
 #endif
@@ -838,7 +942,7 @@ void QuickTick(void* param)
 	g_last_time = g_time;
 
 
-#if (defined WINDOWS) || (defined PLATFORM_BEKEN) || (defined PLATFORM_BL602)
+#if (defined WINDOWS) || (defined PLATFORM_BEKEN) || (defined PLATFORM_BL602) || (defined PLATFORM_LN882H) || (defined PLATFORM_ESPIDF) || (defined PLATFORM_TR6260)
 	SVM_RunThreads(g_deltaTimeMS);
 #endif
 	RepeatingEvents_RunUpdate(g_deltaTimeMS * 0.001f);
@@ -889,7 +993,7 @@ void QuickTick(void* param)
 // this is the bit which runs the quick tick timer
 #if WINDOWS
 
-#elif PLATFORM_BL602
+#elif PLATFORM_BL602 || PLATFORM_W600 || PLATFORM_W800 || PLATFORM_TR6260
 void quick_timer_thread(void* param)
 {
 	while (1) {
@@ -897,14 +1001,8 @@ void quick_timer_thread(void* param)
 		QuickTick(0);
 	}
 }
-#elif PLATFORM_W600 || PLATFORM_W800
-void quick_timer_thread(void* param)
-{
-	while (1) {
-		vTaskDelay(QUICK_TMR_DURATION);
-		QuickTick(0);
-	}
-}
+#elif PLATFORM_ESPIDF
+esp_timer_handle_t g_quick_timer;
 #elif PLATFORM_XR809 || PLATFORM_LN882H
 OS_Timer_t g_quick_timer;
 #else
@@ -914,12 +1012,18 @@ void QuickTick_StartThread(void)
 {
 #if WINDOWS
 
-#elif PLATFORM_BL602
+#elif PLATFORM_BL602 || PLATFORM_W600 || PLATFORM_W800 || PLATFORM_TR6260
 
 	xTaskCreate(quick_timer_thread, "quick", 1024, NULL, 15, NULL);
-#elif PLATFORM_W600 || PLATFORM_W800
+#elif PLATFORM_ESPIDF
+	const esp_timer_create_args_t g_quick_timer_args =
+	{
+			.callback = &QuickTick,
+			.name = "quick"
+	};
 
-	xTaskCreate(quick_timer_thread, "quick", 1024, NULL, 15, NULL);
+	esp_timer_create(&g_quick_timer_args, &g_quick_timer);
+	esp_timer_start_periodic(g_quick_timer, QUICK_TMR_DURATION * 1000);
 #elif PLATFORM_XR809 || PLATFORM_LN882H
 
 	OS_TimerSetInvalid(&g_quick_timer);
@@ -1131,9 +1235,9 @@ void Main_Init_BeforeDelay_Unsafe(bool bAutoRunScripts) {
 				DRV_StartDriver("DoorSensor");
 #endif
 			}
-			if (PIN_FindPinIndexForRole(IOR_CHT8305_CLK, -1) != -1 && PIN_FindPinIndexForRole(IOR_CHT8305_DAT, -1) != -1) {
+			if (PIN_FindPinIndexForRole(IOR_CHT83XX_CLK, -1) != -1 && PIN_FindPinIndexForRole(IOR_CHT83XX_DAT, -1) != -1) {
 #ifndef OBK_DISABLE_ALL_DRIVERS
-				DRV_StartDriver("CHT8305");
+				DRV_StartDriver("CHT83XX");
 #endif
 			}
 			if (PIN_FindPinIndexForRole(IOR_SHT3X_CLK, -1) != -1 && PIN_FindPinIndexForRole(IOR_SHT3X_DAT, -1) != -1) {
@@ -1164,14 +1268,14 @@ void Main_Init_BeforeDelay_Unsafe(bool bAutoRunScripts) {
 				DRV_StartDriver("GN6932");
 #endif
 			}
-			if ((PIN_FindPinIndexForRole(IOR_TM1638_CLK, -1) != -1) &&
-				(PIN_FindPinIndexForRole(IOR_TM1638_DAT, -1) != -1) &&
-				(PIN_FindPinIndexForRole(IOR_TM1638_STB, -1) != -1))
-			{
-#ifndef OBK_DISABLE_ALL_DRIVERS
-				DRV_StartDriver("TM1638");
-#endif
-			}
+//			if ((PIN_FindPinIndexForRole(IOR_TM1638_CLK, -1) != -1) &&
+//				(PIN_FindPinIndexForRole(IOR_TM1638_DAT, -1) != -1) &&
+//				(PIN_FindPinIndexForRole(IOR_TM1638_STB, -1) != -1))
+//			{
+//#ifndef OBK_DISABLE_ALL_DRIVERS
+//				DRV_StartDriver("TM1638");
+//#endif
+//			}
 		}
 	}
 
@@ -1263,9 +1367,11 @@ void Main_Init_After_Delay()
 	if (bSafeMode) {
 		ADDLOGF_INFO("###### safe mode activated - boot failures %d", g_bootFailures);
 	}
-
-	wifi_ssid = CFG_GetWiFiSSID();
-	wifi_pass = CFG_GetWiFiPass();
+#if ALLOW_SSID2
+	Init_WiFiSSIDactual_FromChannelIfSet();//Channel must be set in early.bat using CMD_setStartupSSIDChannel
+#endif
+	wifi_ssid = CFG_GetWiFiSSIDX();
+	wifi_pass = CFG_GetWiFiPassX();
 
 #if 0
 	// you can use this if you bricked your module by setting wrong access point data
