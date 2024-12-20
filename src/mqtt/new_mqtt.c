@@ -1183,6 +1183,8 @@ void dnsFound(const char *name, ip_addr_t *ipaddr, void *arg)
 	{
 		memcpy(&mqtt_ip_resolved, ipaddr, sizeof(mqtt_ip_resolved));
 		dns_resolved = true;
+		/* Try to reconnect immediately after resolving the host */
+		mqtt_loopsWithDisconnected = LOOPS_WITH_DISCONNECTED + 1;
 		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "mqtt_host %s resolution SUCCESS\r\n", name);
 	}
 	else
@@ -1291,6 +1293,13 @@ static int MQTT_do_connect(mqtt_client_t* client)
 		}
 	}
 
+		// host name/ip
+		//ipaddr_aton(mqtt_host,&mqtt_ip);
+	if (dns_in_progress_time <= 0 && dns_resolved)
+	{
+		dns_resolved = false;
+		memcpy(&mqtt_ip, &mqtt_ip_resolved, sizeof(mqtt_ip_resolved));
+
 		/* Includes for MQTT over TLS */
 #if MQTT_USE_TLS
 		/* Free old configuration */
@@ -1343,16 +1352,10 @@ static int MQTT_do_connect(mqtt_client_t* client)
 				addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "Secure TLS config fail. Try connect anyway.");
 			}
 		}
-#endif
+#endif /* MQTT_USE_TLS */
 
-		// host name/ip
-		//ipaddr_aton(mqtt_host,&mqtt_ip);
-	if (dns_in_progress_time <= 0 && dns_resolved)
-	{
-		dns_resolved = false;
-		memcpy(&mqtt_ip, &mqtt_ip_resolved, sizeof(mqtt_ip_resolved));
 
-#endif
+#endif /* ELSE WINDOWS*/
 
 		/* Initiate client and connect to server, if this fails immediately an error code is returned
 		  otherwise mqtt_connection_cb will be called with connection result after attempting
@@ -1385,6 +1388,8 @@ static int MQTT_do_connect(mqtt_client_t* client)
 		{
 			addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "mqtt_host %s is being resolved by gethostbyname\r\n", mqtt_host);
 			dns_in_progress_time--;
+			/* Discount connection event if host is being resolved */
+			mqtt_connect_events--;
 		}
 		else
 		{
