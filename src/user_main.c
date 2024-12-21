@@ -529,7 +529,9 @@ void Main_ConnectToWiFiNow() {
 	// otherwise callbacks are not possible (e.g. WIFI_STA_CONNECTING can never be called )!!
 	HAL_WiFi_SetupStatusCallback(Main_OnWiFiStatusChange);
 	ADDLOGF_INFO("Registered for wifi changes\r\n");
-	ADDLOGF_INFO("Connecting to SSID [%s]\r\n", wifi_ssid);
+	/* do not log sensitive data */
+	// ADDLOGF_INFO("Connecting to SSID [%s]\r\n", wifi_ssid);
+	ADDLOGF_INFO("Connecting to SSID [%s]\r\n", "********");
 	HAL_ConnectToWiFi(wifi_ssid, wifi_pass, &g_cfg.staticIP);
 	// don't set g_connectToWiFi = 0; here!
 	// this would overwrite any changes, e.g. from Main_OnWiFiStatusChange !
@@ -1406,7 +1408,9 @@ void Main_Init_After_Delay()
 	}
 
 	ADDLOGF_INFO("Using SSID [%s]\r\n", wifi_ssid);
-	ADDLOGF_INFO("Using Pass [%s]\r\n", wifi_pass);
+	/* do not log sensitive data */
+	//ADDLOGF_INFO("Using Pass [%s]\r\n", wifi_pass);
+	ADDLOGF_INFO("Using Pass [%s]\r\n", "********");
 
 	// NOT WORKING, I done it other way, see ethernetif.c
 	//net_dhcp_hostname_set(g_shortDeviceName);

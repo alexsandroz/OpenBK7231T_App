@@ -1221,13 +1221,17 @@ static int MQTT_do_connect(mqtt_client_t* client)
 	mqtt_verify_tls_cert = CFG_GetMQTTVerifyTlsCert();
 #endif
 
-	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "mqtt_userName %s\r\nmqtt_pass %s\r\nmqtt_clientID %s\r\nmqtt_host %s:%d\r\n",
-		mqtt_userName,
-		mqtt_pass,
-		mqtt_clientID,
-		mqtt_host,
-		mqtt_port
-	);
+	if (dns_in_progress_time <= 0 && !dns_resolved) {
+		addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "mqtt_userName %s\r\nmqtt_pass %s\r\nmqtt_clientID %s\r\nmqtt_host %s:%d\r\n",
+			mqtt_userName,
+			/* do not log sensitive data */
+			//mqtt_pass,
+			"********",
+			mqtt_clientID,
+			mqtt_host,
+			mqtt_port
+		);
+	}
 
 	// set pointer, there are no buffers to strcpy
 	// empty field for us means "no password", etc,
