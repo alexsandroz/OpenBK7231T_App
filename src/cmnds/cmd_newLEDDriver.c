@@ -847,7 +847,12 @@ static commandResult_t temperature(const void *context, const char *cmd, const c
 	//return 0;
 }
 OBK_Publish_Result LED_SendEnableAllState() {
-	return MQTT_PublishMain_StringInt_DeDuped(DEDUP_LED_ENABLEALL,DEDUP_EXPIRE_TIME,"led_enableAll",g_lightEnableAll,0);
+	/* retains light status */
+	int flag_retain = 0;
+	if (CFG_HasFlag(OBK_FLAG_MQTT_RETAIN_POWER_CHANNELS)) {
+		flag_retain |= OBK_PUBLISH_FLAG_RETAIN;
+	}	
+	return MQTT_PublishMain_StringInt_DeDuped(DEDUP_LED_ENABLEALL,DEDUP_EXPIRE_TIME,"led_enableAll",g_lightEnableAll,flag_retain);
 }
 
 void LED_ToggleEnabled() {
@@ -893,6 +898,15 @@ void LED_SetEnableAll(int bEnable) {
 		// https://github.com/openshwprojects/OpenBK7231T_App/issues/498
 		// TODO: check if it's OK 
 		LED_SendDimmerChange();
+		/* publishes rgb state too */
+		if(shouldSendRGB()) {
+			if(CFG_HasFlag(OBK_FLAG_MQTT_BROADCASTLEDPARAMSTOGETHER)) {
+				sendColorChange();
+			}	
+			if(CFG_HasFlag(OBK_FLAG_MQTT_BROADCASTLEDFINALCOLOR)) {
+				sendFinalColor();
+			}
+		}
 	}
 }
 int LED_GetEnableAll() {
