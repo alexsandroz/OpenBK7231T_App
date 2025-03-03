@@ -1,4 +1,8 @@
 
+#include "../obk_config.h"
+
+#if ENABLE_MQTT 
+
 #include "new_mqtt.h"
 #include "../new_common.h"
 #include "../new_pins.h"
@@ -590,7 +594,7 @@ int channelGet(obk_mqtt_request_t* request) {
 	}
 
 	addLogAdv(LOG_INFO, LOG_FEATURE_MQTT, "channelGet part topic %s", p);
-
+#if ENABLE_LED_BASIC
 	if (stribegins(p, "led_enableAll")) {
 		LED_SendEnableAllState();
 		return 1;
@@ -611,6 +615,7 @@ int channelGet(obk_mqtt_request_t* request) {
 		sendColorChange();
 		return 1;
 	}
+#endif
 
 	// atoi won't parse any non-decimal chars, so it should skip over the rest of the topic.
 	channel = atoi(p);
@@ -840,6 +845,10 @@ static OBK_Publish_Result MQTT_PublishTopicToClient(mqtt_client_t* client, const
 {
 	err_t err;
 	u8_t qos = 1; /* 0 1 or 2, see MQTT specification */
+	if (flags & OBK_PUBLISH_FLAG_QOS_ZERO)
+	{
+		qos = 0;
+	}
 	u8_t retain = 0; /* No don't retain such crappy payload... */
 	size_t sVal_len;
 	char* pub_topic;
@@ -1743,7 +1752,8 @@ static BENCHMARK_TEST_INFO* info = NULL;
 
 #if WINDOWS
 
-#elif PLATFORM_BL602 || PLATFORM_W600 || PLATFORM_W800 || PLATFORM_ESPIDF || PLATFORM_TR6260
+#elif PLATFORM_BL602 || PLATFORM_W600 || PLATFORM_W800 || PLATFORM_ESPIDF || PLATFORM_TR6260 \
+	|| PLATFORM_REALTEK
 static void mqtt_timer_thread(void* param)
 {
 	while (1)
@@ -1783,7 +1793,8 @@ commandResult_t MQTT_StartMQTTTestThread(const void* context, const char* cmd, c
 
 #if WINDOWS
 
-#elif PLATFORM_BL602 || PLATFORM_W600 || PLATFORM_W800 || PLATFORM_ESPIDF || PLATFORM_TR6260
+#elif PLATFORM_BL602 || PLATFORM_W600 || PLATFORM_W800 || PLATFORM_ESPIDF || PLATFORM_TR6260 \
+	|| PLATFORM_REALTEK
 	xTaskCreate(mqtt_timer_thread, "mqtt", 1024, (void*)info, 15, NULL);
 #elif PLATFORM_XR809 || PLATFORM_LN882H
 	OS_TimerSetInvalid(&timer);
@@ -1971,23 +1982,29 @@ OBK_Publish_Result MQTT_DoItemPublish(int idx)
 
 	case PUBLISHITEM_SELF_DYNAMIC_LIGHTSTATE:
 	{
+#if ENABLE_LED_BASIC
 		if (LED_IsLEDRunning()) {
 			return LED_SendEnableAllState();
 		}
+#endif
 		return OBK_PUBLISH_WAS_NOT_REQUIRED;
 	}
 	case PUBLISHITEM_SELF_DYNAMIC_LIGHTMODE:
 	{
+#if ENABLE_LED_BASIC
 		if (LED_IsLEDRunning()) {
 			return LED_SendCurrentLightModeParam_TempOrColor();
 		}
+#endif
 		return OBK_PUBLISH_WAS_NOT_REQUIRED;
 	}
 	case PUBLISHITEM_SELF_DYNAMIC_DIMMER:
 	{
+#if ENABLE_LED_BASIC
 		if (LED_IsLEDRunning()) {
 			return LED_SendDimmerChange();
 		}
+#endif
 		return OBK_PUBLISH_WAS_NOT_REQUIRED;
 	}
 
@@ -2023,11 +2040,12 @@ OBK_Publish_Result MQTT_DoItemPublish(int idx)
 		sprintf(dataStr, "%d", LWIP_GetActiveSockets());
 		return MQTT_DoItemPublishString("sockets", dataStr);
 
-
+#ifndef NO_CHIP_TEMPERATURE
 	case PUBLISHITEM_SELF_TEMP:
 		sprintf(dataStr, "%.2f", getInternalTemperature());
 		return MQTT_DoItemPublishString("temp", dataStr);
-		
+#endif
+
 	case PUBLISHITEM_SELF_RSSI:
 		sprintf(dataStr, "%d", HAL_GetWifiStrength());
 		return MQTT_DoItemPublishString("rssi", dataStr);
@@ -2473,6 +2491,7 @@ bool MQTT_IsReady() {
 	return mqtt_client && res;
 }
 
+#endif // ENABLE_MQTT
 #if MQTT_USE_TLS
 #ifdef MBEDTLS_ENTROPY_HARDWARE_ALT
 #include "fake_clock_pub.h"

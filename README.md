@@ -15,7 +15,8 @@ This repository is named "OpenBK7231T_App", but now it's a multiplatform app, su
 - [LN882H](https://www.elektroda.com/rtvforum/topic4027545.html) by Lightning Semi - [datasheet](https://www.elektroda.com/rtvforum/topic4027545.html), see [flashing how-to](https://www.elektroda.com/rtvforum/topic4028087.html), see [sample device teardown and flashing](https://www.elektroda.com/rtvforum/topic4032240.html), see [new flash tool](https://www.elektroda.com/rtvforum/topic4045532.html), see [dev board](https://www.elektroda.com/rtvforum/topic4050274.html)
 - Windows, via [simulator](https://www.elektroda.com/rtvforum/topic4046056.html)
 - ESP32 (working good, guide will be released soon, [development topic](https://www.elektroda.com/rtvforum/topic4074860.html))
-- BK7238 (WIP)
+- RTL8710C/RTL8720C (WBR2, WBR3, etc), see [guide](https://www.elektroda.com/rtvforum/topic4097185.html)
+- BK7238 (see [tutorial for 1$ board](https://www.elektroda.com/rtvforum/topic4106397.html#21440428))
 - TR6260 (see [guide](https://www.elektroda.com/rtvforum/topic4093752.html))
 
 Please use automatically compiled binaries from the Releases tab. To build yourself for a given platform, just checkout first our version of SDK and then checkout this app repository into it, details later.

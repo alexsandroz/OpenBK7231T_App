@@ -12,6 +12,7 @@
 #include "lwip/sockets.h"
 #include "lwip/ip_addr.h"
 #include "lwip/inet.h"
+#include "lwip/netdb.h"
 #include "../cJSON/cJSON.h"
 
 #ifndef WINDOWS
@@ -160,11 +161,11 @@ static void sendQueryThreadInternal() {
 
 	if (connect(s, (struct sockaddr *)&server, sizeof(server)) < 0) {
 		closesocket(s);
-		return 1;
+		return;
 	}
 	if (send(s, g_request, strlen(g_request), 0) < 0) {
 		closesocket(s);
-		return 1;
+		return;
 	}
 	char buffer[1024];
 	int recv_size = recv(s, buffer, sizeof(buffer) - 1, 0);
@@ -253,7 +254,7 @@ void OWM_AppendInformationToHTTPIndexPage(http_request_t *request) {
 		struct tm *tm = gmtime(&g_weather.sunrise);
 		strftime(buff, sizeof(buff), "%H:%M:%S", tm);
 		hprintf255(request, "<h5>Timezone: %d, Sunrise: %s, ", g_weather.timezone, buff);
-		tm = gmtime(&g_weather.sunrise);
+		tm = gmtime(&g_weather.sunset);
 		strftime(buff, sizeof(buff), "%H:%M:%S", tm);
 		hprintf255(request, "Sunset: %s</h5>", buff);
 	}
@@ -273,8 +274,20 @@ waitFor WiFiState 4
 owm_request
 */
 void DRV_OpenWeatherMap_Init() {
+	//cmddetail:{"name":"owm_setup","args":"[lat][lng][api_key]",
+	//cmddetail:"descr":"Setups OWM driver for your location and API key",
+	//cmddetail:"fn":"NULL);","file":"driver/drv_openWeatherMap.c","requires":"",
+	//cmddetail:"examples":""}
 	CMD_RegisterCommand("owm_setup", CMD_OWM_Setup, NULL);
+	//cmddetail:{"name":"owm_request","args":"",
+	//cmddetail:"descr":"Sends OWM request to the API. Do not use it too often, as API may have limits",
+	//cmddetail:"fn":"NULL);","file":"driver/drv_openWeatherMap.c","requires":"",
+	//cmddetail:"examples":""}
 	CMD_RegisterCommand("owm_request", CMD_OWM_Request, NULL);
+	//cmddetail:{"name":"owm_channels","args":"[temperature][humidity][pressure]",
+	//cmddetail:"descr":"Sets channels that will be used to store OWM response results",
+	//cmddetail:"fn":"NULL);","file":"driver/drv_openWeatherMap.c","requires":"",
+	//cmddetail:"examples":""}
 	CMD_RegisterCommand("owm_channels", CMD_OWM_Channels, NULL);
 
 

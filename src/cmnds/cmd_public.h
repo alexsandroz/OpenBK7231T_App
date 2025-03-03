@@ -169,7 +169,8 @@ int Tokenizer_GetArgsCount();
 bool Tokenizer_CheckArgsCountAndPrintWarning(const char* cmdStr, int reqCount);
 const char* Tokenizer_GetArg(int i);
 const char* Tokenizer_GetArgFrom(int i);
-int Tokenizer_GetArgInteger(int i);
+int Tokenizer_GetArgInteger(int i); 
+int Tokenizer_GetPin(int i, int def);
 int Tokenizer_GetArgIntegerDefault(int i, int def);
 float Tokenizer_GetArgFloatDefault(int i, float def);
 bool Tokenizer_IsArgInteger(int i);
@@ -198,6 +199,7 @@ int EventHandlers_GetActiveCount();
 // cmd_tasmota.c
 int taslike_commands_init();
 // cmd_newLEDDriver.c
+#if ENABLE_LED_BASIC
 void NewLED_InitCommands();
 void NewLED_RestoreSavedStateIfNeeded();
 float LED_GetDimmer();
@@ -253,6 +255,8 @@ OBK_Publish_Result LED_SendCurrentLightModeParam_TempOrColor();
 void LED_ResetGlobalVariablesToDefaults();
 extern float led_temperature_min;
 extern float led_temperature_max;
+#endif
+
 // cmd_test.c
 int CMD_InitTestCommands();
 // cmd_channels.c
@@ -268,6 +272,7 @@ const char* CMD_GetResultString(commandResult_t r);
 
 void SVM_RunThreads(int deltaMS);
 void CMD_InitScripting();
+void SVM_RunStartupCommandAsScript();
 byte* LFS_ReadFile(const char* fname);
 int LFS_WriteFile(const char *fname, const byte *data, int len, bool bAppend);
 
