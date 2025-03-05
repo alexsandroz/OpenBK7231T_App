@@ -973,6 +973,13 @@ void CMD_Init_Early() {
 	//cmddetail:"fn":"NULL);","file":"cmnds/cmd_main.c","requires":"",
 	//cmddetail:"examples":""}
 	CMD_RegisterCommand("IndexRefreshInterval", CMD_IndexRefreshInterval, NULL);
+#if MQTT_USE_TLS
+	//cmddetail:{"name":"WebServer","args":"[0 - Stop / 1 - Start]",
+	//cmddetail:"descr":"Setting state of WebServer",
+	//cmddetail:"fn":"CMD_WebServer","file":"cmnds/cmd_main.c","requires":"",
+	//cmddetail:"examples":""}
+	CMD_RegisterCommand("WebServer", CMD_WebServer, NULL);
+#endif
 	
 #if ENABLE_OBK_SCRIPTING
 	CMD_InitScripting();

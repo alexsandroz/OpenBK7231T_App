@@ -1118,7 +1118,6 @@ int http_fn_cfg_mqtt(http_request_t* request) {
 
 	add_label_text_field(request, "Host", "host", CFG_GetMQTTHost(), "<form action=\"/cfg_mqtt_set\">");
 	add_label_numeric_field(request, "Port", "port", CFG_GetMQTTPort(), "<br>");
-
 #if MQTT_USE_TLS
 	hprintf255(request, "<input type=\"checkbox\" id=\"mqtt_use_tls\" name=\"mqtt_use_tls\" value=\"1\"");
 	if (CFG_GetMQTTUseTls()) {
@@ -1134,8 +1133,7 @@ int http_fn_cfg_mqtt(http_request_t* request) {
 
 	add_label_text_field(request, "Certificate File (CA Root or Public Certificate PEM format)", "mqtt_cert_file", CFG_GetMQTTCertFile(), "<br>");
 #endif
-
-	add_label_text_field(request, "Client Topic (Base Topic)", "client", CFG_GetMQTTClientId(), "<br>");
+	add_label_text_field(request, "Client Topic (Base Topic)", "client", CFG_GetMQTTClientId(), "<br><br>");
 	add_label_text_field(request, "Group Topic (Secondary Topic to only receive cmnds)", "group", CFG_GetMQTTGroupTopic(), "<br>");
 	add_label_text_field(request, "User", "user", CFG_GetMQTTUserName(), "<br>");
 	add_label_password_field(request, "Password", "password", CFG_GetMQTTPass(), "<br>");
