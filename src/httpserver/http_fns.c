@@ -1386,8 +1386,6 @@ int http_fn_cfg_wifi(http_request_t* request) {
 		{
 			hprintf255(request, "[%i/%u] SSID: %s, Channel: %i, Signal %i<br>", i + 1, number, ap_info[i].ssid, ap_info[i].primary, ap_info[i].rssi);
 		}
-#elif PLATFORM_TR6260
-		poststr(request, "TODO TR6260<br>");
 #elif defined(PLATFORM_REALTEK)
 #ifndef PLATFORM_RTL87X0C
 		extern void rltk_wlan_enable_scan_with_ssid_by_extended_security(bool);
@@ -3119,6 +3117,13 @@ void OTA_RequestDownloadFromHTTP(const char* s) {
 #elif PLATFORM_ESPIDF
 #elif PLATFORM_TR6260
 #elif PLATFORM_REALTEK
+#elif PLATFORM_ECR6600
+	extern int http_client_download_file(const char* url, unsigned int len);
+	extern int ota_done(bool reset);
+	delay_ms(100);
+	int ret = http_client_download_file(s, strlen(s));
+	if(ret != -1) ota_done(1);
+	else ota_done(0);
 #elif PLATFORM_W600 || PLATFORM_W800
 	t_http_fwup(s);
 #elif PLATFORM_XR809
