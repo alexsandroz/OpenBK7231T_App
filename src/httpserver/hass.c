@@ -520,6 +520,17 @@ HassDeviceInfo* hass_init_energy_sensor_device_info(int index, int asensdataseti
 	// if (index == OBK_CONSUMPTION_STATS) { //hide this as its not working anyway at present
 	// 	cJSON_AddStringToObject(info->root, "enabled_by_default ", "false");
 	// }
+	
+	//Add availability_topic to instant sensors
+	switch (index)
+	{
+	case OBK_VOLTAGE:
+	case OBK_POWER:
+	case OBK_CURRENT:
+		cJSON_AddStringToObject(info->root, "avty_t", "~/connected");   
+		break;
+	}
+
 	return info;
 }
 
