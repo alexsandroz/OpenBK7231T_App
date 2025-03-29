@@ -1065,6 +1065,7 @@ typedef enum channelType_e {
 #define SPECIAL_CHANNEL_BASECOLOR_COOL	136
 #define SPECIAL_CHANNEL_BASECOLOR_WARM	137
 #define SPECIAL_CHANNEL_BASECOLOR_LAST	137
+#define SPECIAL_CHANNEL_OBK_FREQUENCY 138
 
 // note: real limit here is MAX_RETAIN_CHANNELS
 #define SPECIAL_CHANNEL_FLASHVARS_FIRST	200
@@ -1493,6 +1494,11 @@ extern const char* g_channelTypeNames[];
 #if ALLOW_SSID2
 int FV_GetStartupSSID_StoredValue(int adefault);
 void FV_UpdateStartupSSIDIfChanged_StoredValue(int assidindex);
+#endif
+
+#ifdef ENABLE_BL_MOVINGAVG
+float XJ_MovingAverage_float(float aprevvalue, float aactvalue);
+int XJ_MovingAverage_int(int aprevvalue, int aactvalue);
 #endif
 
 #endif

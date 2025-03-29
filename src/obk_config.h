@@ -71,6 +71,14 @@
 
 #elif WINDOWS
 
+#if LINUX
+
+#else
+
+#define ENABLE_SDL_WINDOW	1
+
+#endif
+
 
 #define	ENABLE_HA_DISCOVERY		1
 #define ENABLE_SEND_POSTANDGET		1
@@ -385,6 +393,7 @@
 #define ENABLE_CALENDAR_EVENTS					1
 #define ENABLE_DRIVER_TUYAMCU					1
 #define ENABLE_DRIVER_BL0942					1
+#define ENABLE_DRIVER_BL0937					1
 
 #define OBK_OTA_EXTENSION 						".img"
 
@@ -404,8 +413,10 @@
 // if power metering chip is enabled, also enable backend for that
 #if ENABLE_DRIVER_BL0937 || ENABLE_DRIVER_BL0942 || ENABLE_DRIVER_BL0942SPI || ENABLE_DRIVER_CSE7766
 #define ENABLE_BL_SHARED	1
-//allow use two BL0942 on two ports  +600 bytes
+//allow use two BL0942 on two ports  +940 bytes
 //#define ENABLE_BL_TWIN	1
+//allow moving average energy calculation +180 bytes
+//#define ENABLE_BL_MOVINGAVG	1
 #endif
 
 // closing OBK_CONFIG_H
