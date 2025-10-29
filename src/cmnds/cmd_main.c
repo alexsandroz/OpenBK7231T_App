@@ -825,10 +825,25 @@ static commandResult_t CMD_WebServer(const void* context, const char* cmd, const
 			return CMD_RES_OK;
 		}
 		else if (strcmp(Tokenizer_GetArg(0), "1") == 0) {
+			if (!CFG_GetDisableWebServer()) {
+				ADDLOG_INFO(LOG_FEATURE_CMD, "WebServer already enabled");
+				return CMD_RES_OK;
+			}			
 			ADDLOG_INFO(LOG_FEATURE_CMD, "Enable WebServer and restart");
 			CFG_SetDisableWebServer(false);
 			CFG_Save_IfThereArePendingChanges();
 			HAL_RebootModule();
+			return CMD_RES_OK;
+		}
+		else if (strcmp(Tokenizer_GetArg(0), "2") == 0) {
+			if (!CFG_GetDisableWebServer()) {
+				ADDLOG_INFO(LOG_FEATURE_CMD, "WebServer already enabled");
+				return CMD_RES_OK;
+			}			
+			ADDLOG_INFO(LOG_FEATURE_CMD, "Enable WebServer NO RESTART");
+			CFG_SetDisableWebServer(false);
+			CFG_Save_IfThereArePendingChanges();
+			HTTPServer_Start();
 			return CMD_RES_OK;
 		}
 	} 
@@ -836,7 +851,7 @@ static commandResult_t CMD_WebServer(const void* context, const char* cmd, const
 	return CMD_RES_BAD_ARGUMENT;
 }
 #endif
-
+	
 void CMD_Init_Early() {
 	//cmddetail:{"name":"alias","args":"[Alias][Command with spaces]",
 	//cmddetail:"descr":"add an aliased command, so a command with spaces can be called with a short, nospaced alias",
