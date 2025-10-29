@@ -64,6 +64,7 @@ typedef struct http_request_tag {
 
 int HTTP_ProcessPacket(http_request_t* request);
 void http_setup(http_request_t* request, const char* type);
+void http_setup_gz(http_request_t* request, const char* type);
 void http_html_start(http_request_t* request, const char* pagename);
 void http_html_end(http_request_t* request);
 int poststr(http_request_t* request, const char* str);
@@ -95,6 +96,8 @@ typedef int (*http_callback_fn)(http_request_t* request);
 int HTTP_RegisterCallback(const char* url, int method, http_callback_fn callback, int auth_required);
 
 int my_strnicmp(const char* a, const char* b, int len);
+
+int http_rest_error(http_request_t* request, int code, char* msg);
 
 #endif
 

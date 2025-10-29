@@ -9,7 +9,7 @@
 #include "../hal/hal_flashVars.h"
 #include "../logging/logging.h"
 #include "../mqtt/new_mqtt.h"
-#include "../ota/ota.h"
+#include "../hal/hal_ota.h"
 #include "drv_local.h"
 #include "drv_ntp.h"
 #include "drv_public.h"
@@ -34,11 +34,13 @@ int stat_updatesSkipped[BL_SENSDATASETS_COUNT] = { 0 ,0 };
 int stat_updatesSent[BL_SENSDATASETS_COUNT] = { 0,0 };
 bool sensors_reciveddata[BL_SENSDATASETS_COUNT] = { 0,0 };  //1 if data received
 float lastSavedEnergyCounterValue[BL_SENSDATASETS_COUNT] = { 0.0f, 0.0f };
+int actual_mday[BL_SENSDATASETS_COUNT] = { -1 ,-1 };
 #else
 float lastSavedEnergyCounterValue[BL_SENSDATASETS_COUNT] = { 0.0f };
 int stat_updatesSkipped[BL_SENSDATASETS_COUNT] = { 0 };
 int stat_updatesSent[BL_SENSDATASETS_COUNT] = { 0 };
 bool sensors_reciveddata[BL_SENSDATASETS_COUNT] = { 0 };  //1 if data received
+int actual_mday[BL_SENSDATASETS_COUNT] = { -1 };
 #endif
 
 // Order corrsponds to enums OBK_VOLTAGE - OBK__LAST
@@ -54,7 +56,7 @@ struct energysensor {
 	// It even fails to publish with -1 error (can't alloc next packet)
 	// So we publish when value changes from certain threshold or when a certain time passes.
 	float changeSendThreshold;
-	double lastReading; //double only needed for energycounter i.e. OBK_CONSUMPTION_TOTAL to avoid rounding errors as value becomes high
+	double lastReading; //double only needed for energycounter i.e. OBK_CONSUMPTION_TOTAL to avoid rounding issues as value becomes high
 	double lastSentValue; // what are the last values we sent over the MQTT?
 	int noChangeFrame; // how much update frames has passed without sending MQTT update of read values?
 };
@@ -116,7 +118,6 @@ portTickType energyCounterMinutesStamp;
 long energyCounterMinutesIndex;
 bool energyCounterStatsJSONEnable = false;
 
-int actual_mday = -1;
 float changeSavedThresholdEnergy = 10.0f;
 long ConsumptionSaveCounter = 0;
 portTickType lastConsumptionSaveStamp;
@@ -134,8 +135,10 @@ void BL09XX_AppendInformationToHTTPIndexPageEx(int asensdatasetix, http_request_
 {
   if ((asensdatasetix < 0) || (asensdatasetix >= BL_SENSDATASETS_COUNT)) return;  //to avoid bad index on data[BL_SENSDATASETS_COUNT]
 #else
-void BL09XX_AppendInformationToHTTPIndexPage(http_request_t * request)
+void BL09XX_AppendInformationToHTTPIndexPage(http_request_t * request, int bPreState)
 {
+	if (bPreState)
+		return;
   int asensdatasetix = BL_SENSORS_IX_0;
 #endif
   energysensdataset_t* sensdataset = &datasetlist[asensdatasetix];
@@ -252,7 +255,9 @@ void BL09XX_AppendInformationToHTTPIndexPage(http_request_t * request)
 }
 
 #if ENABLE_BL_TWIN
-void BL09XX_AppendInformationToHTTPIndexPage(http_request_t* request) {
+void BL09XX_AppendInformationToHTTPIndexPage(http_request_t* request, int bPreState) {
+	if (bPreState)
+		return;
   if (sensors_reciveddata[BL_SENSORS_IX_0]) {
     BL09XX_AppendInformationToHTTPIndexPageEx(BL_SENSORS_IX_0, request);
   }
@@ -276,7 +281,7 @@ void BL09XX_SaveEmeteringStatistics()
     data.TotalConsumption = (float)sensdataset->sensors[OBK_CONSUMPTION_TOTAL].lastReading;
     data.TodayConsumpion = (float)sensdataset->sensors[OBK_CONSUMPTION_TODAY].lastReading;
     data.YesterdayConsumption = (float)sensdataset->sensors[OBK_CONSUMPTION_YESTERDAY].lastReading;
-    data.actual_mday = actual_mday;
+    data.actual_mday = actual_mday[BL_SENSORS_IX_0];//one in flashvars is enough, I assume that both channels are synchronized
 #if ENABLE_BL_TWIN
     data.TotalConsumption_b = (float)sensdataset1->sensors[OBK_CONSUMPTION_TOTAL].lastReading;
     data.TodayConsumpion_b = (float)sensdataset1->sensors[OBK_CONSUMPTION_TODAY].lastReading;
@@ -325,13 +330,7 @@ commandResult_t BL09XX_ResetEnergyCounterEx(int asensdatasetix, float* pvalue)
       energyCounterStamp[asensdatasetix] = xTaskGetTickCount();
     }
     ConsumptionResetTime = (time_t)NTP_GetCurrentTime();
-#if WINDOWS
-#elif PLATFORM_BL602
-#elif PLATFORM_W600 || PLATFORM_W800
-#elif PLATFORM_XR809
-#elif PLATFORM_BK7231N || PLATFORM_BK7231T
-    if (ota_progress()==-1)
-#endif
+    if (OTA_GetProgress()==-1)
     { 
       BL09XX_SaveEmeteringStatistics();
       lastConsumptionSaveStamp = xTaskGetTickCount();
@@ -705,28 +704,22 @@ void BL_ProcessUpdate(float voltage, float current, float power,
       if (ConsumptionResetTime == 0)
         ConsumptionResetTime = (time_t)ntpTime;
 
-      if (actual_mday == -1)
+      if (actual_mday[asensdatasetix] == -1)
       {
-        actual_mday = ltm->tm_mday;
+        actual_mday[asensdatasetix] = ltm->tm_mday;
       }
-      if (actual_mday != ltm->tm_mday)
+      if (actual_mday[asensdatasetix] != ltm->tm_mday)
       {
         for (i = OBK_CONSUMPTION__DAILY_LAST; i >= OBK_CONSUMPTION__DAILY_FIRST; i--) {
           sensdataset->sensors[i].lastReading = sensdataset->sensors[i - 1].lastReading;
         }
         sensdataset->sensors[OBK_CONSUMPTION_TODAY].lastReading = 0.0;
-        actual_mday = ltm->tm_mday;
+        actual_mday[asensdatasetix] = ltm->tm_mday;
 
         //MQTT_PublishMain_StringFloat(sensdataset->sensors[OBK_CONSUMPTION_YESTERDAY].names.name_mqtt, BL_ChangeEnergyUnitIfNeeded(sensors[OBK_CONSUMPTION_YESTERDAY].lastReading ),
         //							sensdataset->sensors[OBK_CONSUMPTION_YESTERDAY].rounding_decimals, 0);
         //stat_updatesSent++;
-#if WINDOWS
-#elif PLATFORM_BL602
-#elif PLATFORM_W600 || PLATFORM_W800
-#elif PLATFORM_XR809
-#elif PLATFORM_BK7231N || PLATFORM_BK7231T
-        if (ota_progress()==-1)
-#endif
+        if (OTA_GetProgress()==-1)
         {
           BL09XX_SaveEmeteringStatistics();
           lastConsumptionSaveStamp = xTaskGetTickCount();
@@ -920,13 +913,7 @@ void BL_ProcessUpdate(float voltage, float current, float power,
       if (((sensdataset->sensors[OBK_CONSUMPTION_TOTAL].lastReading - lastSavedEnergyCounterValue[asensdatasetix]) >= changeSavedThresholdEnergy) ||
       ((xTaskGetTickCount() - lastConsumptionSaveStamp) >= (6 * 3600 * 1000 / portTICK_PERIOD_MS)))
     {
-#if WINDOWS
-#elif PLATFORM_BL602
-#elif PLATFORM_W600 || PLATFORM_W800
-#elif PLATFORM_XR809
-#elif PLATFORM_BK7231N || PLATFORM_BK7231T
-      if (ota_progress() == -1)
-#endif
+      if (OTA_GetProgress() == -1)
       {
         lastSavedEnergyCounterValue[asensdatasetix] = (float)sensdataset->sensors[OBK_CONSUMPTION_TOTAL].lastReading;
         BL09XX_SaveEmeteringStatistics();
@@ -982,7 +969,7 @@ void BL_Shared_Init(void) {
       sensdataset->sensors[OBK_CONSUMPTION_TOTAL].lastReading = data.TotalConsumption;
       sensdataset->sensors[OBK_CONSUMPTION_TODAY].lastReading = data.TodayConsumpion;
       sensdataset->sensors[OBK_CONSUMPTION_YESTERDAY].lastReading = data.YesterdayConsumption;
-      actual_mday = data.actual_mday;
+      actual_mday[BL_SENSORS_IX_0] = data.actual_mday;//one in flashvars is enough, I assume that both channels are synchronized
 #if ENABLE_BL_TWIN
       sensdataset1->sensors[OBK_CONSUMPTION_TOTAL].lastReading = data.TotalConsumption_b;
       sensdataset1->sensors[OBK_CONSUMPTION_TODAY].lastReading = data.TodayConsumpion_b;
@@ -990,6 +977,7 @@ void BL_Shared_Init(void) {
       lastSavedEnergyCounterValue[BL_SENSORS_IX_1] = data.TotalConsumption_b;
       energyCounterStamp[BL_SENSORS_IX_0] = xTaskGetTickCount();
       energyCounterStamp[BL_SENSORS_IX_1] = xTaskGetTickCount();
+      actual_mday[BL_SENSORS_IX_1] = data.actual_mday;//one in flashvars is enough, I assume that both channels are synchronized
 #else
       lastSavedEnergyCounterValue[BL_SENSORS_IX_0] = data.TotalConsumption;
       sensdataset->sensors[OBK_CONSUMPTION_2_DAYS_AGO].lastReading = data.ConsumptionHistory[0];

@@ -136,30 +136,30 @@ static commandResult_t powerAll(const void *context, const char *cmd, const char
 }
 
 
+static commandResult_t cmnd_backlog_old(const void * context, const char *cmd, const char *args, int cmdFlags) {
 
-static commandResult_t cmnd_backlog(const void * context, const char *cmd, const char *args, int cmdFlags){
 	const char *subcmd;
 	const char *p;
 	int count = 0;
-    char copy[128];
-    char *c;
+	char copy[128];
+	char *c;
 	int localRes;
 	int res = CMD_RES_OK;
 	ADDLOG_DEBUG(LOG_FEATURE_CMD, "backlog [%s]", args);
 
 	subcmd = args;
 	p = args;
-	while (*subcmd){
-        c = copy;
-		while (*p){
-			if (*p == ';'){
+	while (*subcmd) {
+		c = copy;
+		while (*p) {
+			if (*p == ';') {
 				p++;
 				break;
 			}
-            *(c) = *(p++);
-            if (c - copy < (sizeof(copy)-1)){
-                c++;
-            }
+			*(c) = *(p++);
+			if (c - copy < (sizeof(copy) - 1)) {
+				c++;
+			}
 		}
 		*c = 0;
 		count++;
@@ -170,7 +170,22 @@ static commandResult_t cmnd_backlog(const void * context, const char *cmd, const
 		subcmd = p;
 	}
 	ADDLOG_DEBUG(LOG_FEATURE_CMD, "backlog executed %d", count);
-
+	return res;
+}
+static commandResult_t cmnd_backlog(const void * context, const char *cmd, const char *args, int cmdFlags){
+	commandResult_t res;
+#if ENABLE_OBK_SCRIPTING
+	if (strcasestr(args, "delay_ms") || strcasestr(args, "delay_s") || strcasestr(args, "waitFor")) {
+		// backlog with delay?
+		SVM_StartBacklog(args);
+		res = CMD_RES_OK;
+	}
+	else 
+#endif
+	{
+		// old backlog - in place
+		res = cmnd_backlog_old(context, cmd, args, cmdFlags);
+	}
 	return res;
 }
 
@@ -192,7 +207,7 @@ byte *LFS_ReadFile(const char *fname) {
 		lfsres = lfs_file_open(&lfs, &file, fname, LFS_O_RDONLY);
 
 		if (lfsres >= 0) {
-			ADDLOG_DEBUG(LOG_FEATURE_CMD, "LFS_ReadFile: openned file %s", fname);
+			ADDLOG_DEBUG(LOG_FEATURE_CMD, "LFS_ReadFile: opened file %s", fname);
 			//lfs_file_seek(&lfs,&file,0,LFS_SEEK_END);
 			//len = lfs_file_tell(&lfs,&file);
 			//lfs_file_seek(&lfs,&file,0,LFS_SEEK_SET);
@@ -205,7 +220,7 @@ byte *LFS_ReadFile(const char *fname) {
 			at = res;
 
 			if(res == 0) {
-				ADDLOG_INFO(LOG_FEATURE_CMD, "LFS_ReadFile: openned file %s but malloc failed for %i", fname, len);
+				ADDLOG_INFO(LOG_FEATURE_CMD, "LFS_ReadFile: opened file %s but malloc failed for %i", fname, len);
 			} else {
 #if 0
 				char buffer[32];
@@ -272,7 +287,7 @@ int LFS_WriteFile(const char *fname, const byte *data, int len, bool bAppend) {
 		}
 
 		if (lfsres >= 0) {
-			ADDLOG_DEBUG(LOG_FEATURE_CMD, "LFS_ReadFile: openned file %s", fname);
+			ADDLOG_DEBUG(LOG_FEATURE_CMD, "LFS_ReadFile: opened file %s", fname);
 
 			lfsres = lfs_file_write(&lfs, &file, data, len);
 			lfs_file_close(&lfs, &file);
@@ -309,7 +324,7 @@ static commandResult_t cmnd_lfsexec(const void * context, const char *cmd, const
 			}
 			lfsres = lfs_file_open(&lfs, file, fname, LFS_O_RDONLY);
 			if (lfsres >= 0) {
-				ADDLOG_DEBUG(LOG_FEATURE_CMD, "openned file %s", fname);
+				ADDLOG_DEBUG(LOG_FEATURE_CMD, "opened file %s", fname);
 				do {
 					char *p = line;
 					do {

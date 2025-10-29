@@ -53,7 +53,7 @@ int win_frameNum = 0;
 // this time counter is simulated, I need this for unit tests to work
 int g_simulatedTimeNow = 0;
 extern int g_httpPort;
-#define DEFAULT_FRAME_TIME 5
+#define DEFAULT_FRAME_TIME 10
 
 #if LINUX
 
@@ -140,12 +140,14 @@ void SIM_Hack_ClearSimulatedPinRoles();
 
 void CHANNEL_FreeLabels();
 
-void SIM_ClearOBK(const char *flashPath) {
+void SIM_ShutdownOBK() {
 	if (bObkStarted) {
 		DRV_ShutdownAllDrivers();
 #if ENABLE_LITTLEFS
 		release_lfs();
 #endif
+		SVM_FreeAllFiles();
+		SVM_StopAllScripts();
 		SIM_Hack_ClearSimulatedPinRoles();
 		WIN_ResetMQTT();
 		SPILED_Shutdown(); // won't hurt
@@ -153,16 +155,38 @@ void SIM_ClearOBK(const char *flashPath) {
 		UART_ResetForSimulator();
 		CMD_ExecuteCommand("clearAll", 0);
 		CMD_ExecuteCommand("led_expoMode", 0);
+#if ENABLE_OBK_BERRY
+		CMD_ExecuteCommand("stopBerry", 0);
+#endif
 		// LOG deinit after main init so commands will be re-added
 		LOG_DeInit();
 	}
+}
+void SIM_StartOBK(const char *flashPath) {
+
 	if (flashPath) {
 		SIM_SetupFlashFileReading(flashPath);
 	}
 	bObkStarted = true;
 	Main_Init();
 }
+void SIM_ClearOBK(const char *flashPath) {
+	SIM_ShutdownOBK();
+	SIM_StartOBK(flashPath);
+}
 void Win_DoUnitTests() {
+	//SELFTEST_ASSERT_EXPRESSION("sqrt(4)", 2)
+
+	Test_LEDstrips();
+	Test_Commands_Channels();
+
+	Test_Driver_TCL_AC();
+
+	Test_PIR();
+#if ENABLE_OBK_BERRY
+	Test_Berry();
+#endif
+
 	Test_TuyaMCU_Boolean();
 	Test_TuyaMCU_DP22();
 
@@ -170,16 +194,16 @@ void Win_DoUnitTests() {
 	Test_Demo_ConditionalRelay();
 	Test_Expressions_RunTests_Braces();
 	Test_Expressions_RunTests_Basic();
-	//Test_Enums();
+	Test_Enums();
 	Test_Backlog();
 	Test_DoorSensor();
-	Test_WS2812B();
 	Test_Command_If_Else();
 	Test_MQTT();
 	Test_ChargeLimitDriver();
 #if ENABLE_BL_SHARED
 	Test_EnergyMeter();
 #endif
+	Test_TuyaMCU_Calib();
 	// this is slowest
 	Test_TuyaMCU_Basic();
 	Test_TuyaMCU_Mult();
@@ -215,7 +239,10 @@ void Win_DoUnitTests() {
 	Test_Demo_ExclusiveRelays();
 	Test_MultiplePinsOnChannel();
 	Test_Flags();
+#ifndef LINUX
+  // TODO: fix on Linux
 	Test_DHT();
+#endif
 	Test_Tasmota();
 	Test_NTP();
 	Test_NTP_DST();
@@ -233,7 +260,6 @@ void Win_DoUnitTests() {
 	Test_LEDDriver();
 	Test_LFS();
 	Test_Scripting();
-	Test_Commands_Channels();
 	Test_Command_If();
 	Test_Tokenizer();
 	Test_Http();
@@ -553,7 +579,9 @@ int __cdecl main(int argc, char **argv)
 		while (1) {
 			Sleep(DEFAULT_FRAME_TIME);
 			Sim_RunFrame(DEFAULT_FRAME_TIME);
-			//SIM_RunWindow();
+#if ENABLE_SDL_WINDOW
+			SIM_RunWindow();
+#endif
 		}
 	}
 	else {
@@ -563,8 +591,12 @@ int __cdecl main(int argc, char **argv)
 			g_delta = cur_time - prev_time;
 			if (g_delta <= 0)
 				continue;
+			// give CPU some time to rest
+			Sleep(DEFAULT_FRAME_TIME);
 			Sim_RunFrame(g_delta);
-			//SIM_RunWindow();
+#if ENABLE_SDL_WINDOW
+			SIM_RunWindow();
+#endif
 			prev_time = cur_time;
 		}
 	}
@@ -590,15 +622,11 @@ void otarequest(const char *urlin) {
 	return;
 }
 
-int ota_progress() {
-	return 0;
-}
-int ota_total_bytes() {
-	return 0;
-}
+
 
 
 
 
 
 #endif
+

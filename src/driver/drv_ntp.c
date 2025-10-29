@@ -10,7 +10,7 @@
 #include "../cmnds/cmd_public.h"
 #include "../httpserver/new_http.h"
 #include "../logging/logging.h"
-#include "../ota/ota.h"
+#include "../hal/hal_ota.h"
 
 #include "drv_ntp.h"
 
@@ -334,6 +334,16 @@ uint32_t setDST(bool setNTP)
 
 	struct tm *ltm;
 	ltm = gmtime(&tempt);
+#if ENABLE_NTP_SUNRISE_SUNSET
+    if (old_DST != g_DST){
+	// if we had a DST switch, we might corect sunset/sunrise events, which were calculated before (with "previous" DST settings)
+	// if we changed to DST, we need to add DST_offset (old_DST = 0)
+	// if we were in DST before switch, we need to sub DST_offset (old_DST = g_DST_offset)
+	ADDLOG_INFO(LOG_FEATURE_RAW, "DST switch - calling  fix_DSTforEvents(%d)\r\n", old_DST ? - g_DST_offset : g_DST_offset );
+	fix_DSTforEvents( old_DST ? - g_DST_offset : g_DST_offset );
+    }
+#endif
+
 	ADDLOG_INFO(LOG_FEATURE_RAW, "In %s time - next DST switch at %lu (" LTSTR ")\r\n",
 	(g_DST)?"summer":"standard", next_DST_switch_epoch, LTM2TIME(ltm));
 	return g_DST;
@@ -521,7 +531,7 @@ void NTP_Init() {
 	NTP_Init_Events();
 #endif
 #if ENABLE_NTP_DST
-	//cmddetail:{"name":"CLOCK_CalcDST","args":"[nthWeekEnd monthEnd dayEnd hourEnd nthWeekStart monthStart dayStart hourStart [g_DSToffset hours - default is 1 if unset]",
+	//cmddetail:{"name":"clock_calcDST","args":"[nthWeekEnd monthEnd dayEnd hourEnd nthWeekStart monthStart dayStart hourStart [g_DSToffset hours - default is 1 if unset]",
 	//cmddetail:"descr":"Checks, if actual time is during DST or not.",
 	//cmddetail:"fn":"CLOCK_CalcDST","file":"driver/drv_ntp.c","requires":"",
 	//cmddetail:"examples":""}
@@ -718,15 +728,11 @@ void NTP_OnEverySecond()
 	if (b_ntp_simulatedTime) {
 		return;
 	}
-#elif PLATFORM_BL602
-#elif PLATFORM_W600 || PLATFORM_W800
-#elif PLATFORM_XR809
-#elif PLATFORM_BK7231N || PLATFORM_BK7231T
-    if (ota_progress() != -1)
+#endif
+    if (OTA_GetProgress() != -1)
     {
         return;
     }
-#endif
     if(g_ntp_socket == 0) {
         // if no socket, this is a reconnect delay
         if(g_ntp_delay > 0) {
@@ -747,8 +753,10 @@ void NTP_OnEverySecond()
     }
 }
 
-void NTP_AppendInformationToHTTPIndexPage(http_request_t* request)
+void NTP_AppendInformationToHTTPIndexPage(http_request_t* request, int bPreState)
 {
+	if (bPreState)
+		return;
     struct tm *ltm;
 
     ltm = gmtime(&g_ntpTime);

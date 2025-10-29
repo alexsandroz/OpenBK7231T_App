@@ -96,7 +96,7 @@ static void CMD_ServerThread( beken_thread_arg_t arg )
 				    ADDLOG_DEBUG(LOG_FEATURE_CMD,  "CMD Client failed to made non-blocking" );
 				}
 #endif
-             //   os_strcpy( client_ip_str, inet_ntoa( client_addr.sin_addr ) );
+             //   strcpy( client_ip_str, inet_ntoa( client_addr.sin_addr ) );
            ///     ADDLOG_DEBUG(LOG_FEATURE_CMD,  "CMD Client %s:%d connected, fd: %d", client_ip_str, client_addr.sin_port, client_fd );
 				CMD_ClientThread(client_fd);
 				lwip_close( client_fd );;
@@ -105,7 +105,7 @@ static void CMD_ServerThread( beken_thread_arg_t arg )
     }
 
     if ( err != kNoErr )
-		  ADDLOG_ERROR(LOG_FEATURE_CMD,  "Server listerner thread exit with err: %d", err );
+		  ADDLOG_ERROR(LOG_FEATURE_CMD,  "Server listener thread exit with err: %d", err );
 
     lwip_close( tcp_listen_fd );
 

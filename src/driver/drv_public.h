@@ -49,7 +49,8 @@ typedef struct energySensorNames_s {
 extern int g_dhtsCount;
 
 void DRV_Generic_Init();
-void DRV_AppendInformationToHTTPIndexPage(http_request_t* request);
+void DRV_OnHassDiscovery(const char *topic);
+void DRV_AppendInformationToHTTPIndexPage(http_request_t* request, int bPreState);
 void DRV_OnEverySecond();
 void DHT_OnEverySecond();
 void DHT_OnPinsConfigChanged();
@@ -61,8 +62,9 @@ void DRV_ShutdownAllDrivers();
 bool DRV_IsRunning(const char* name);
 void DRV_OnChannelChanged(int channel, int iVal);
 #if PLATFORM_BK7231N
-void SM16703P_setMultiplePixel(uint32_t pixel, uint8_t *data, bool push);
+void Strip_setMultiplePixel(uint32_t pixel, uint8_t *data, bool push);
 #endif
+void DRV_GosundSW2_Write(float* rgbcw);
 void SM2135_Write(float* rgbcw);
 void BP5758D_Write(float* rgbcw);
 void BP1658CJ_Write(float* rgbcw);

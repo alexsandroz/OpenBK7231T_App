@@ -4,8 +4,10 @@
 #include "../../new_cfg.h"
 #include "../../new_common.h"
 #include "../../logging/logging.h"
+#include "../../new_pins.h"
 #include <lwip/sockets.h>
 #include <lwip/netif.h>
+#include <lwip/dns.h>
 #include <wifi/wifi_conf.h>
 #include <wifi/wifi_util.h>
 #include <lwip_netconf.h>
@@ -18,24 +20,31 @@ extern void InitEasyFlashIfNeeded();
 extern int wifi_change_mac_address_from_ram(int idx, uint8_t* mac);
 extern int wifi_scan_networks_with_ssid_by_extended_security(int (results_handler)(char* buf, int buflen, char* ssid, void* user_data),
 	void* user_data, int scan_buflen, char* ssid, int ssid_len);
+extern unsigned char psk_essid[NET_IF_NUM][32 + 4];
+extern unsigned char psk_passphrase[NET_IF_NUM][128 + 1];
+extern unsigned char wpa_global_PSK[NET_IF_NUM][20 * 2];
+
+extern uint8_t wmac[6];
+extern bool g_powersave;
 
 typedef struct
 {
 	char ssid[32];
 	char pwd[64];
+	unsigned char bssid[6];
 } wifi_data_t;
 
 bool g_STA_static_IP = 0;
+bool mac_init = false;
 
 static void (*g_wifiStatusCallback)(int code) = NULL;
 static int g_bOpenAccessPointMode = 0;
 static wifi_data_t wdata = { 0 };
-extern uint8_t wmac[6];
-extern bool g_powersave;
 static int g_bStaticIP = 0;
 static char g_IP[16] = "unknown";
 static char g_GW[16] = "unknown";
 static char g_MS[16] = "unknown";
+obkFastConnectData_t fcdata = { 0 };
 
 const char* HAL_GetMyIPString()
 {
@@ -49,7 +58,7 @@ const char* HAL_GetMyGatewayString()
 
 const char* HAL_GetMyDNSString()
 {
-	return NULL;
+	return ipaddr_ntoa(dns_getserver(0));
 }
 
 const char* HAL_GetMyMaskString()
@@ -57,31 +66,63 @@ const char* HAL_GetMyMaskString()
 	return g_MS;
 }
 
+#if PLATFORM_RTL8710A
+extern int wifi_set_mac_address(char* mac);
+#endif
+
 int WiFI_SetMacAddress(char* mac)
 {
 	printf("WiFI_SetMacAddress\r\n");
-#ifdef PLATFORM_RTL8720D
+#if PLATFORM_RTL8720D
 	InitEasyFlashIfNeeded();
 	wifi_change_mac_address_from_ram(0, (uint8_t*)mac);
+	memcpy(wmac, mac, sizeof(wmac));
 	return ef_set_env_blob("rtlmac", mac, sizeof(wmac));
-#endif
+#elif PLATFORM_RTL8710A
+	InitEasyFlashIfNeeded();
+	char macstr[21];
+	memset(macstr, 0, sizeof(macstr));
+	sprintf(macstr, "%02x%02x%02x%02x%02x%02x", \
+		mac[0], mac[1], mac[2], \
+		mac[3], mac[4], mac[5]);
+	wifi_set_mac_address(macstr);
+	wifi_off();
+	vTaskDelay(20);
+	wifi_on(RTW_MODE_STA);
+	return ef_set_env_blob("rtlmac", mac, sizeof(wmac));
+#else
 	return 0; // error
+#endif
 }
 
 void WiFI_GetMacAddress(char* mac)
 {
-#ifdef PLATFORM_RTL8720D
+#if PLATFORM_RTL8720D || PLATFORM_RTL8710A
 	//if((wmac[0] == 255 && wmac[1] == 255 && wmac[2] == 255 && wmac[3] == 255 && wmac[4] == 255 && wmac[5] == 255)
 	//	|| (wmac[0] == 0 && wmac[1] == 0 && wmac[2] == 0 && wmac[3] == 0 && wmac[4] == 0 && wmac[5] == 0))
+	if(!mac_init)
 	{
 		InitEasyFlashIfNeeded();
 		uint8_t fmac[6] = { 0 };
 		int readLen = ef_get_env_blob("rtlmac", &fmac, sizeof(fmac), NULL);
 		if(readLen)
 		{
+#if PLATFORM_RTL8710A
+			char macstr[21];
+			memset(macstr, 0, sizeof(macstr));
+			sprintf(macstr, "%02x%02x%02x%02x%02x%02x", \
+				fmac[0], fmac[1], fmac[2], \
+				fmac[3], fmac[4], fmac[5]);
+			wifi_set_mac_address(macstr);
+			wifi_off();
+			vTaskDelay(20);
+			wifi_on(RTW_MODE_STA);
+#else
 			wifi_change_mac_address_from_ram(0, fmac);
+#endif
 			memcpy(wmac, fmac, sizeof(fmac));
 		}
+		mac_init = true;
 	}
 #endif
 	memcpy(mac, (char*)wmac, sizeof(wmac));
@@ -101,6 +142,7 @@ void HAL_PrintNetworkInfo()
 	WiFI_GetMacAddress((char*)mac);
 	ADDLOG_DEBUG(LOG_FEATURE_GENERAL, "+--------------- net device info ------------+\r\n");
 	ADDLOG_DEBUG(LOG_FEATURE_GENERAL, "|netif type    : %-16s            |\r\n", g_bOpenAccessPointMode == 0 ? "STA" : "AP");
+	ADDLOG_DEBUG(LOG_FEATURE_GENERAL, "|netif rssi    = %-16i            |\r\n", HAL_GetWifiStrength());
 	ADDLOG_DEBUG(LOG_FEATURE_GENERAL, "|netif ip      = %-16s            |\r\n", HAL_GetMyIPString());
 	ADDLOG_DEBUG(LOG_FEATURE_GENERAL, "|netif mask    = %-16s            |\r\n", HAL_GetMyMaskString());
 	ADDLOG_DEBUG(LOG_FEATURE_GENERAL, "|netif gateway = %-16s            |\r\n", HAL_GetMyGatewayString());
@@ -115,9 +157,19 @@ int HAL_GetWifiStrength()
 	return rssi;
 }
 
+char* HAL_GetWiFiBSSID(char* bssid){
+	uint8_t mac[6];
+	wext_get_bssid(WLAN0_NAME, mac);
+	sprintf(bssid, MACSTR, MAC2STR(mac));
+	return bssid; 
+};
+uint8_t HAL_GetWiFiChannel(uint8_t *chan){
+	wext_get_channel(WLAN0_NAME, chan);
+	return *chan;
+};
+
 void HAL_WiFi_SetupStatusCallback(void (*cb)(int code))
 {
-	printf("HAL_WiFi_SetupStatusCallback\r\n");
 	g_wifiStatusCallback = cb;
 }
 
@@ -148,6 +200,7 @@ int obk_find_ap_from_scan_buf(char* buf, int buflen, char* target_ssid, void* us
 			pwifi->channel = *(buf + plen + BUFLEN_LEN + MAC_LEN + RSSI_LEN + SECURITY_LEN_EXTENDED + WPS_ID_LEN);
 			security_mode = *(int*)(buf + plen + BUFLEN_LEN + MAC_LEN + RSSI_LEN);
 			pwifi->security_type = security_mode;
+			memcpy(wdata.bssid, buf + plen + BUFLEN_LEN, 6);
 			break;
 		}
 		plen += len;
@@ -186,9 +239,9 @@ void wifi_dis_hdl(u8* buf, u32 buf_len, u32 flags, void* userdata)
 		memset(&g_IP, 0, 16);
 		memset(&g_GW, 0, 16);
 		memset(&g_MS, 0, 16);
-		strcpy(&g_IP, "unknown");
-		strcpy(&g_GW, "unknown");
-		strcpy(&g_MS, "unknown");
+		strcpy((char*)&g_IP, "unknown");
+		strcpy((char*)&g_GW, "unknown");
+		strcpy((char*)&g_MS, "unknown");
 	}
 }
 
@@ -200,9 +253,9 @@ void wifi_conned_hdl(u8* buf, u32 buf_len, u32 flags, void* userdata)
 		memset(&g_IP, 0, 16);
 		memset(&g_GW, 0, 16);
 		memset(&g_MS, 0, 16);
-		strcpy(&g_IP, ipaddr_ntoa((const ip4_addr_t*)&xnetif[g_bOpenAccessPointMode].ip_addr.addr));
-		strcpy(&g_GW, ipaddr_ntoa((const ip4_addr_t*)&xnetif[g_bOpenAccessPointMode].gw.addr));
-		strcpy(&g_MS, ipaddr_ntoa((const ip4_addr_t*)&xnetif[g_bOpenAccessPointMode].netmask.addr));
+		strcpy((char*)&g_IP, ipaddr_ntoa((const ip4_addr_t*)&xnetif[g_bOpenAccessPointMode].ip_addr.addr));
+		strcpy((char*)&g_GW, ipaddr_ntoa((const ip4_addr_t*)&xnetif[g_bOpenAccessPointMode].gw.addr));
+		strcpy((char*)&g_MS, ipaddr_ntoa((const ip4_addr_t*)&xnetif[g_bOpenAccessPointMode].netmask.addr));
 	}
 }
 
@@ -244,10 +297,40 @@ void ConnectToWiFiTask(void* args)
 		ADDLOG_ERROR(LOG_FEATURE_GENERAL, "Can't connect to AP");
 		goto exit;
 	}
-	if(g_bStaticIP == 0) {
-	    LwIP_DHCP(0, DHCP_START);
+	if(g_bStaticIP == 0) 
+	{
+		LwIP_DHCP(0, DHCP_START);
 	}
 	if(wifi_is_up(RTW_STA_INTERFACE) && g_powersave) wifi_enable_powersave();
+
+	if(CFG_HasFlag(OBK_FLAG_WIFI_ENHANCED_FAST_CONNECT))
+	{
+		ef_get_env_blob("fcdata", &fcdata, sizeof(obkFastConnectData_t), NULL);
+		unsigned char bssid[6] = { 0 };
+		if(wifi_get_ap_bssid((unsigned char*)&bssid) == -1)
+		{
+			ADDLOG_WARN(LOG_FEATURE_GENERAL, "Failed to get bssid, using one from scan");
+			memcpy(bssid, wdata.bssid, 6);
+		}
+		rtw_wifi_setting_t setting;
+		wifi_get_setting(WLAN0_NAME, &setting);
+		if(strcmp((char*)setting.password, fcdata.pwd) != 0 ||
+			memcmp(wpa_global_PSK, fcdata.wpa_global_PSK, 40) != 0 ||
+			memcmp(&bssid, fcdata.bssid, 6) != 0 ||
+			setting.channel != fcdata.channel ||
+			setting.security_type != fcdata.security_type)
+		{
+			ADDLOG_INFO(LOG_FEATURE_GENERAL, "Saved fast connect data differ to current one, saving...");
+			memset(&fcdata, 0, sizeof(obkFastConnectData_t));
+			strcpy(fcdata.pwd, (char*)setting.password);
+			memcpy(fcdata.wpa_global_PSK, wpa_global_PSK, 40);
+			fcdata.channel = setting.channel;
+			fcdata.security_type = setting.security_type;
+			memcpy(fcdata.bssid, &bssid, sizeof(bssid));
+			ef_set_env_blob("fcdata", &fcdata, sizeof(obkFastConnectData_t));
+		}
+	}
+
 	vTaskDelete(NULL);
 	return;
 exit:
@@ -256,24 +339,22 @@ exit:
 		g_wifiStatusCallback(WIFI_STA_DISCONNECTED);
 	}
 	vTaskDelete(NULL);
+	return;
 }
 
-void HAL_ConnectToWiFi(const char* oob_ssid, const char* connect_key, obkStaticIP_t* ip)
+void ConfigureSTA(obkStaticIP_t* ip)
 {
 	struct ip_addr ipaddr;
 	struct ip_addr netmask;
 	struct ip_addr gw;
-	g_bOpenAccessPointMode = 0;
-	strcpy((char*)&wdata.ssid, oob_ssid);
-	strcpy((char*)&wdata.pwd, connect_key);
-	wifi_set_autoreconnect(0);
+	struct ip_addr dnsserver;
 
-	if (ip->localIPAddr[0] == 0) 
+	if(ip->localIPAddr[0] == 0)
 	{
 		//dhcps_init(&xnetif[0]);
 		g_bStaticIP = 0;
 	}
-	else 
+	else
 	{
 		// dhcps_deinit();
 		g_bStaticIP = 1;
@@ -281,18 +362,35 @@ void HAL_ConnectToWiFi(const char* oob_ssid, const char* connect_key, obkStaticI
 		IP4_ADDR(ip_2_ip4(&ipaddr), ip->localIPAddr[0], ip->localIPAddr[1], ip->localIPAddr[2], ip->localIPAddr[3]);
 		IP4_ADDR(ip_2_ip4(&netmask), ip->netMask[0], ip->netMask[1], ip->netMask[2], ip->netMask[3]);
 		IP4_ADDR(ip_2_ip4(&gw), ip->gatewayIPAddr[0], ip->gatewayIPAddr[1], ip->gatewayIPAddr[2], ip->gatewayIPAddr[3]);
+		IP4_ADDR(ip_2_ip4(&dnsserver), ip->dnsServerIpAddr[0], ip->dnsServerIpAddr[1], ip->dnsServerIpAddr[2], ip->dnsServerIpAddr[3]);
 		netif_set_addr(&xnetif[0], ip_2_ip4(&ipaddr), ip_2_ip4(&netmask), ip_2_ip4(&gw));
+		dns_setserver(0, &dnsserver);
 	}
-	
+	if(!g_bStaticIP) wifi_config_autoreconnect(1, 2, 3);
+	else wifi_set_autoreconnect(0);
 	netif_set_hostname(&xnetif[0], CFG_GetDeviceName());
+}
+
+void RegisterHandlers()
+{
 	wifi_reg_event_handler(WIFI_EVENT_DISCONNECT, (rtw_event_handler_t)wifi_dis_hdl, NULL);
-	if (g_bStaticIP) 
+	if(g_bStaticIP)
 	{
 		// with static IP, assume  that connect is enough?
 		wifi_reg_event_handler(WIFI_EVENT_CONNECT, (rtw_event_handler_t)wifi_conned_hdl, NULL);
 	}
 	wifi_reg_event_handler(WIFI_EVENT_STA_GOT_IP, (rtw_event_handler_t)wifi_conned_hdl, NULL);
 	wifi_reg_event_handler(WIFI_EVENT_CHALLENGE_FAIL, (rtw_event_handler_t)wifi_af_hdl, NULL);
+}
+
+void HAL_ConnectToWiFi(const char* oob_ssid, const char* connect_key, obkStaticIP_t* ip)
+{
+	g_bOpenAccessPointMode = 0;
+	strcpy((char*)&wdata.ssid, oob_ssid);
+	strncpy((char*)&wdata.pwd, connect_key, 64);
+	
+	ConfigureSTA(ip);
+	RegisterHandlers();
 
 	xTaskCreate(
 		(TaskFunction_t)ConnectToWiFiTask,
@@ -301,6 +399,50 @@ void HAL_ConnectToWiFi(const char* oob_ssid, const char* connect_key, obkStaticI
 		NULL,
 		9,
 		NULL);
+}
+
+void HAL_FastConnectToWiFi(const char* oob_ssid, const char* connect_key, obkStaticIP_t* ip)
+{
+	int len = ef_get_env_blob("fcdata", &fcdata, sizeof(obkFastConnectData_t), NULL);
+	if(len == sizeof(obkFastConnectData_t))
+	{
+		ADDLOG_INFO(LOG_FEATURE_GENERAL, "We have fast connection data, connecting...");
+		strcpy((char*)psk_essid, oob_ssid);
+		strcpy((char*)psk_passphrase, fcdata.pwd);
+		memcpy(wpa_global_PSK, fcdata.wpa_global_PSK, sizeof(fcdata.wpa_global_PSK));
+		ConfigureSTA(ip);
+		RegisterHandlers();
+
+		g_wifiStatusCallback(WIFI_STA_CONNECTING);
+		int ret = wifi_connect_bssid((unsigned char*)fcdata.bssid, (char*)oob_ssid, fcdata.security_type, fcdata.pwd,
+			sizeof(fcdata.bssid), strlen(oob_ssid), strlen(fcdata.pwd), 0, NULL);
+		if(ret != RTW_SUCCESS)
+		{
+			ADDLOG_ERROR(LOG_FEATURE_GENERAL, "Can't connect to AP");
+			g_wifiStatusCallback(WIFI_STA_DISCONNECTED);
+			return;
+		}
+		if(g_bStaticIP == 0)
+		{
+			LwIP_DHCP(0, DHCP_START);
+		}
+		if(wifi_is_up(RTW_STA_INTERFACE) && g_powersave) wifi_enable_powersave();
+		return;
+	}
+	else if(len)
+	{
+		ADDLOG_INFO(LOG_FEATURE_GENERAL, "Fast connect data len (%i) != saved len (%i)", sizeof(obkFastConnectData_t), len);
+	}
+	else
+	{
+		ADDLOG_INFO(LOG_FEATURE_GENERAL, "Fast connect data is empty, connecting normally");
+	}
+	HAL_ConnectToWiFi(oob_ssid, connect_key, ip);
+}
+
+void HAL_DisableEnhancedFastConnect()
+{
+	ef_del_env("fcdata");
 }
 
 void HAL_DisconnectFromWifi()
@@ -334,9 +476,9 @@ int HAL_SetupWiFiOpenAccessPoint(const char* ssid)
 	IP4_ADDR(ip_2_ip4(&ipaddr), 192, 168, 4, 1);
 	IP4_ADDR(ip_2_ip4(&netmask), 255, 255, 255, 0);
 	IP4_ADDR(ip_2_ip4(&gw), 192, 168, 4, 1);
-	strcpy(&g_IP, "192.168.4.1");
-	strcpy(&g_GW, "192.168.4.1");
-	strcpy(&g_MS, "255.255.255.0");
+	strcpy((char*)&g_IP, "192.168.4.1");
+	strcpy((char*)&g_GW, "192.168.4.1");
+	strcpy((char*)&g_MS, "255.255.255.0");
 	netif_set_addr(pnetif, ip_2_ip4(&ipaddr), ip_2_ip4(&netmask), ip_2_ip4(&gw));
 	dhcps_init(pnetif);
 	return 0;

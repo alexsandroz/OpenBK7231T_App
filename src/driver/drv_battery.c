@@ -38,8 +38,8 @@ static void Batt_Measure() {
 		//channel_rel = g_cfg.pins.channels[g_pin_rel];
 		//}
 	}
-	// maybe move init code to Batt_Init?
-	HAL_ADC_Init(g_pin_adc);
+	// should be already initialized in pins
+	//HAL_ADC_Init(g_pin_adc);
 	g_battlevel = HAL_ADC_Read(g_pin_adc);
 	if (g_battlevel < 1024) {
 		ADDLOG_INFO(LOG_FEATURE_DRV, "DRV_BATTERY : ADC Value low device not on battery");
@@ -150,13 +150,13 @@ void Batt_Init() {
 
 	//cmddetail:{"name":"Battery_Setup","args":"[minbatt][maxbatt][V_divider][Vref][AD Bits]",
 	//cmddetail:"descr":"measure battery based on ADC. <br />req. args: minbatt in mv, maxbatt in mv. <br />optional: V_divider(2), Vref(default 2400), ADC bits(4096)",
-	//cmddetail:"fn":"Battery_Setup","file":"drv/drv_battery.c","requires":"",
+	//cmddetail:"fn":"Battery_Setup","file":"driver/drv_battery.c","requires":"",
 	//cmddetail:"examples":"Battery_Setup 1500 3000 2 2400 4096"}
 	CMD_RegisterCommand("Battery_Setup", Battery_Setup, NULL);
 
 	//cmddetail:{"name":"Battery_cycle","args":"[int]",
 	//cmddetail:"descr":"change cycle of measurement by default every 10 seconds",
-	//cmddetail:"fn":"Battery_cycle","file":"drv/drv_battery.c","requires":"",
+	//cmddetail:"fn":"Battery_cycle","file":"driver/drv_battery.c","requires":"",
 	//cmddetail:"examples":"Battery_cycle 60"}
 	CMD_RegisterCommand("Battery_cycle", Battery_cycle, NULL);
 
@@ -180,8 +180,11 @@ void Batt_OnEverySecond() {
 void Batt_StopDriver() {
 
 }
-void Batt_AppendInformationToHTTPIndexPage(http_request_t* request)
+void Batt_AppendInformationToHTTPIndexPage(http_request_t* request, int bPreState)
 {
+	if (bPreState) {
+		return;
+	}
 	hprintf255(request, "<h2>Battery level=%.2f%%, voltage=%.2fmV</h2>", g_battlevel, g_battvoltage);
 }
 

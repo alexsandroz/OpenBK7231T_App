@@ -2,6 +2,7 @@
 #include "main.h"
 #include "wifi_constants.h"
 #include "rom_map.h"
+#include "rtl8721d_flash.h"
 #include "device_lock.h"
 
 extern void wlan_network(void);
@@ -118,19 +119,25 @@ static void app_dslp_wake(void)
 extern void Main_Init();
 extern void Main_OnEverySecond();
 extern uint32_t ota_get_cur_index(void);
+extern void WiFI_GetMacAddress(char* mac);
 
 TaskHandle_t g_sys_task_handle1;
 uint8_t wmac[6] = { 0 };
 rtw_mode_t wifi_mode = RTW_MODE_NONE;
 uint32_t current_fw_idx;
+uint8_t flash_size_8720 = 32;
+extern int g_sleepfactor;
+
+__attribute__((weak)) void _fini(void) {}
 
 static void obk_task(void* pvParameters)
 {
+	WiFI_GetMacAddress(&wmac);
 	vTaskDelay(50 / portTICK_PERIOD_MS);
 	Main_Init();
 	for(;;)
 	{
-		vTaskDelay(1000 / portTICK_PERIOD_MS);
+		vTaskDelay(1000 / portTICK_PERIOD_MS / g_sleepfactor);
 		Main_OnEverySecond();
 	}
 	vTaskDelete(NULL);
@@ -158,8 +165,8 @@ int main(void)
 	ipc_table_init();
 
 	/* Register Log Uart Callback function */
-	InterruptRegister((IRQ_FUN)shell_uart_irq_rom, UART_LOG_IRQ, (u32)NULL, 5);
-	InterruptEn(UART_LOG_IRQ, 5);
+	//InterruptRegister((IRQ_FUN)shell_uart_irq_rom, UART_LOG_IRQ, (u32)NULL, 5);
+	//InterruptEn(UART_LOG_IRQ, 5);
 
 	if(TRUE == SOCPS_DsleepWakeStatusGet())
 	{
@@ -176,6 +183,9 @@ int main(void)
 	free(efuse);
 	current_fw_idx = ota_get_cur_index();
 
+	uint8_t flash_ID[4];
+	FLASH_RxCmd(flash_init_para.FLASH_cmd_rd_id, 3, flash_ID);
+	flash_size_8720 = (1 << (flash_ID[2] - 0x11)) / 8;
 	app_start_autoicg();
 	//app_shared_btmem(ENABLE);
 

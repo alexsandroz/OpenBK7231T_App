@@ -16,6 +16,7 @@
 static void (*g_wifiStatusCallback)(int code) = NULL;
 extern system_event_cb_t s_event_handler_cb;
 uint8_t wmac[6] = { 0 };
+uint8_t g_enable_cmw = 0;
 
 bool g_bStaticIP = false, mac_init = false;
 
@@ -89,6 +90,28 @@ int HAL_GetWifiStrength()
 	wifi_get_wifi_info(&ap_info);
 	return ap_info.rssi;
 }
+
+
+char* HAL_GetWiFiBSSID(char* bssid){
+	if (wifi_get_sta_status()==STA_STATUS_CONNECTED){
+		wifi_info_t ap_info;
+		memset((void*)&ap_info, 0, sizeof(wifi_info_t));
+		wifi_get_wifi_info(&ap_info);
+		sprintf(bssid, MACSTR, MAC2STR(ap_info.bssid));
+		return bssid;
+	}
+	bssid[0]='\0';
+	return bssid; 
+};
+uint8_t HAL_GetWiFiChannel(uint8_t *chan){
+	if (wifi_get_sta_status()==STA_STATUS_CONNECTED){
+		*chan = wifi_rf_get_channel();
+		return *chan;
+	}
+	return 0;
+};
+
+
 
 static sys_err_t handle_wifi_event(void* ctx, system_event_t* event)
 {
@@ -179,6 +202,7 @@ void HAL_ConnectToWiFi(const char* oob_ssid, const char* connect_key, obkStaticI
 		IP_ADDR4(&if_ip.dns1, ip->dnsServerIpAddr[0], ip->dnsServerIpAddr[1], ip->dnsServerIpAddr[2], ip->dnsServerIpAddr[3]);
 		set_sta_ipconfig(&if_ip);
 	}
+	g_enable_cmw = 1;
 	wifi_set_status(STATION_IF, STA_STATUS_START);
 	struct netif* nif = NULL;
 	nif = get_netif_by_index(STATION_IF);

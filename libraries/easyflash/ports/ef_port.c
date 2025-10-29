@@ -30,13 +30,138 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#if !WINDOWS && !PLATFORM_TXW81X && !PLATFORM_RDA5981 && !LINUX
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include "queue.h"
+#endif
+
+#if PLATFORM_REALTEK
+
 #include "flash_api.h"
 #include "device_lock.h"
 
 flash_t flash;
+
+#elif defined(PLATFORM_W800) || defined(PLATFORM_W600)
+
+#include "wm_internal_flash.h"
+#include "wm_flash.h"
+#define QueueHandle_t xQueueHandle
+
+#elif PLATFORM_XRADIO
+
+#include "driver/chip/hal_flash.h"
+#include <image/flash.h>
+#define QueueHandle_t xQueueHandle
+
+#elif PLATFORM_TXW81X
+
+#include "sys_config.h"
+#include "typesdef.h"
+#include "csi_kernel.h"
+#include "osal/csky/defs.h"
+#include "dev.h"
+#include "hal/spi_nor.h"
+#include "lib/syscfg/syscfg.h"
+#include "osal/csky/string.h"
+
+typedef k_mutex_handle_t QueueHandle_t;
+#define xSemaphoreCreateMutex csi_kernel_mutex_new
+#define xSemaphoreTake(a, b) csi_kernel_mutex_lock(a, b, 0)
+#define xSemaphoreGive(a) csi_kernel_mutex_unlock(a)
+extern struct spi_nor_flash* obk_flash;
+
+#elif PLATFORM_RDA5981
+
+#include "stdbool.h"
+#include "rda_sys_wrapper.h"
+
+typedef void* QueueHandle_t;
+#define xSemaphoreCreateMutex rda_mutex_create
+#define xSemaphoreTake rda_mutex_wait
+#define xSemaphoreGive rda_mutex_realease
+
+#elif WINDOWS
+
+#include "framework.h"
+
+#define QueueHandle_t HANDLE
+extern QueueHandle_t ef_mutex;
+
+BYTE* env_area = NULL;
+uint32_t ENV_AREA_SIZE = 0;
+
+DllExport BYTE* get_env_area(void)
+{
+	return env_area;
+}
+
+DllExport void set_env_size(uint32_t size)
+{
+	ENV_AREA_SIZE = size;
+	if(env_area) free(env_area);
+	env_area = malloc(size * sizeof(BYTE));
+}
+
+HANDLE xSemaphoreCreateMutex()
+{
+	return CreateMutex(NULL, FALSE, NULL);
+}
+
+void xSemaphoreTake(HANDLE handle, int time)
+{
+	WaitForSingleObject(ef_mutex, time);
+}
+
+void xSemaphoreGive(HANDLE handle)
+{
+	ReleaseMutex(ef_mutex);
+}
+
+#elif LINUX
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+#include <pthread.h>
+
+#define QueueHandle_t pthread_mutex_t
+extern QueueHandle_t ef_mutex;
+
+uint8_t* env_area = NULL;
+uint32_t ENV_AREA_SIZE = 0;
+
+DllExport uint8_t* get_env_area(void)
+{
+	return env_area;
+}
+
+DllExport void set_env_size(uint32_t size)
+{
+	ENV_AREA_SIZE = size;
+	if(env_area) free(env_area);
+	env_area = malloc(size * sizeof(uint8_t));
+}
+
+QueueHandle_t xSemaphoreCreateMutex()
+{
+	pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+	pthread_mutex_init(&mutex, NULL);
+	return mutex;
+}
+
+void xSemaphoreTake(QueueHandle_t handle, int time)
+{
+	pthread_mutex_lock(&handle);
+}
+
+void xSemaphoreGive(QueueHandle_t handle)
+{
+	pthread_mutex_unlock(&handle);
+}
+
+#endif
 
 /* default ENV set for user */
 static const ef_env default_env_set[] =
@@ -62,6 +187,9 @@ EfErrCode ef_port_init(ef_env const** default_env, size_t* default_env_size)
 	*default_env_size = sizeof(default_env_set) / sizeof(default_env_set[0]);
 
 	ef_mutex = xSemaphoreCreateMutex();
+#if defined(PLATFORM_W800) || defined(PLATFORM_W600)
+	tls_fls_init();
+#endif
 
 	return result;
 }
@@ -78,12 +206,28 @@ EfErrCode ef_port_init(ef_env const** default_env, size_t* default_env_size)
  */
 EfErrCode ef_port_read(uint32_t addr, uint32_t* buf, size_t size)
 {
+#if PLATFORM_REALTEK
 	device_mutex_lock(RT_DEV_LOCK_FLASH);
 	int res = flash_stream_read(&flash, addr, size, buf);
 	device_mutex_unlock(RT_DEV_LOCK_FLASH);
-
 	if(res) return EF_NO_ERR;
 	else return EF_READ_ERR;
+#elif defined(PLATFORM_W800) || defined(PLATFORM_W600)
+	int res = tls_fls_read(addr, (uint8_t*)buf, size);
+	if(res != TLS_FLS_STATUS_OK) return EF_READ_ERR;
+	else return EF_NO_ERR;
+#elif PLATFORM_XRADIO
+	int res = flash_rw(0, addr, (void*)buf, size, 0);
+	if(res == 0) res = EF_READ_ERR;
+	else res = EF_NO_ERR;
+	return res;
+#elif WINDOWS || LINUX
+	memcpy(buf, env_area + addr, size);
+	return EF_NO_ERR;
+#elif PLATFORM_TXW81X || PLATFORM_RDA5981
+	HAL_FlashRead(buf, size, addr);
+	return EF_NO_ERR;
+#endif
 }
 
 /**
@@ -103,10 +247,26 @@ EfErrCode ef_port_erase(uint32_t addr, size_t size)
 	/* make sure the start address is a multiple of FLASH_ERASE_MIN_SIZE */
 	EF_ASSERT(addr % EF_ERASE_MIN_SIZE == 0);
 
+#if PLATFORM_REALTEK
 	device_mutex_lock(RT_DEV_LOCK_FLASH);
 	flash_erase_sector(&flash, addr);
 	device_mutex_unlock(RT_DEV_LOCK_FLASH);
 
+#elif defined(PLATFORM_W800) || defined(PLATFORM_W600)
+	int res = tls_fls_erase(addr / EF_ERASE_MIN_SIZE);
+	if(res != TLS_FLS_STATUS_OK) return EF_ERASE_ERR;
+	else return EF_NO_ERR;
+#elif PLATFORM_XRADIO
+	int res = flash_erase(0, addr, EF_ERASE_MIN_SIZE);
+	if(res != 0) res = EF_ERASE_ERR;
+	else res = EF_NO_ERR;
+	return res;
+#elif WINDOWS || LINUX
+	memset(env_area + addr, 0xFF, size);
+#elif PLATFORM_TXW81X || PLATFORM_RDA5981
+	HAL_FlashEraseSector(addr);
+	return EF_NO_ERR;
+#endif
 	return result;
 }
 /**
@@ -122,12 +282,30 @@ EfErrCode ef_port_erase(uint32_t addr, size_t size)
  */
 EfErrCode ef_port_write(uint32_t addr, const uint32_t* buf, size_t size)
 {
+#if PLATFORM_REALTEK
 	device_mutex_lock(RT_DEV_LOCK_FLASH);
 	int res = flash_stream_write(&flash, addr, size, buf);
 	device_mutex_unlock(RT_DEV_LOCK_FLASH);
 
 	if(res) return EF_NO_ERR;
 	else return EF_WRITE_ERR;
+
+#elif defined(PLATFORM_W800) || defined(PLATFORM_W600)
+	int res = tls_fls_write(addr, (uint8_t*)buf, size);
+	if(res != TLS_FLS_STATUS_OK) return EF_WRITE_ERR;
+	else return EF_NO_ERR;
+#elif PLATFORM_XRADIO
+	int res = flash_rw(0, addr, (void*)buf, size, 1);
+	if(res == 0) res = EF_WRITE_ERR;
+	else res = EF_NO_ERR;
+	return res;
+#elif WINDOWS || LINUX
+	memcpy(env_area + addr, buf, size);
+	return EF_NO_ERR;
+#elif PLATFORM_TXW81X || PLATFORM_RDA5981
+	HAL_FlashWrite(buf, size, addr);
+	return EF_NO_ERR;
+#endif
 }
 
 /**

@@ -2,9 +2,10 @@
 #include "http_fns.h"
 #include "../new_pins.h"
 #include "../new_cfg.h"
-#include "../ota/ota.h"
+#include "../hal/hal_ota.h"
 // Commands register, execution API and cmd tokenizer
 #include "../cmnds/cmd_public.h"
+#include "../cmnds/cmd_enums.h"
 #include "../driver/drv_tuyaMCU.h"
 #include "../driver/drv_public.h"
 #include "../driver/drv_bl_shared.h"
@@ -33,8 +34,9 @@
 #include <wifi_mgmr_ext.h> //For BL602 WiFi AP Scan
 #elif PLATFORM_W600 || PLATFORM_W800
 
-#elif PLATFORM_XR809
+#elif PLATFORM_XRADIO
 #include <image/flash.h>
+#include <ota/ota.h>
 #elif defined(PLATFORM_BK7231N)
 // tuya-iotos-embeded-sdk-wifi-ble-bk7231n/sdk/include/tuya_hal_storage.h
 #include "tuya_hal_storage.h"
@@ -42,7 +44,7 @@
 #include "temp_detect_pub.h"
 #elif defined(PLATFORM_LN882H)
 #elif defined(PLATFORM_TR6260)
-#elif defined(PLATFORM_REALTEK)
+#elif defined(PLATFORM_REALTEK) && !PLATFORM_REALTEK_NEW
 	#include "wifi_structures.h"
 	#include "wifi_constants.h"
 	#include "wifi_conf.h"
@@ -52,7 +54,12 @@
 	extern hal_reset_reason_t reset_reason;
 	#endif
 	SemaphoreHandle_t scan_hdl;
-#elif defined(PLATFORM_ESPIDF)
+#elif PLATFORM_REALTEK_NEW
+#include "lwip_netconf.h"
+#include "ameba_soc.h"
+#include "ameba_ota.h"
+extern uint32_t current_fw_idx;
+#elif defined(PLATFORM_ESPIDF) || PLATFORM_ESP8266
 #include "esp_wifi.h"
 #include "esp_system.h"
 #elif defined(PLATFORM_BK7231T)
@@ -61,6 +68,8 @@
 #include "tuya_hal_storge.h"
 #include "BkDriverFlash.h"
 #include "temp_detect_pub.h"
+#elif defined(PLATFORM_ECR6600)
+#include "hal_system.h"
 #endif
 
 #if (defined(PLATFORM_BK7231T) || defined(PLATFORM_BK7231N)) && !defined(PLATFORM_BEKEN_NEW)
@@ -78,6 +87,8 @@ const char* g_typesLowMidHighHighest[] = { "Low","Mid","High","Highest" };
 const char* g_typesOffOnRemember[] = { "Off", "On", "Remember" };
 const char* g_typeLowMidHigh[] = { "Low","Mid","High" };
 const char* g_typesLowestLowMidHighHighest[] = { "Lowest", "Low", "Mid", "High", "Highest" };;
+const char* g_typeOpenStopClose[] = { "Open","Stop","Close" };
+const char* g_typeStopUpDown[] = { "Stop","Up","Down" };
 
 #define ADD_OPTION(t,a) if(type == t) { *numTypes = sizeof(a)/sizeof(a[0]); return a; }
 
@@ -89,6 +100,8 @@ const char **Channel_GetOptionsForChannelType(int type, int *numTypes) {
 	ADD_OPTION(ChType_LowMidHighHighest, g_typesLowMidHighHighest);
 	ADD_OPTION(ChType_OffOnRemember, g_typesOffOnRemember);
 	ADD_OPTION(ChType_LowMidHigh, g_typeLowMidHigh);
+	ADD_OPTION(ChType_OpenStopClose, g_typeOpenStopClose);
+	ADD_OPTION(ChType_StopUpDown, g_typeStopUpDown);
 	
 	*numTypes = 0;
 	return 0;
@@ -218,14 +231,8 @@ int http_fn_index(http_request_t* request) {
 		if (DRV_IsRunning("SM16703P")) {
 			bForceShowRGB = true;
 		}
-		else 
-#endif
-#if ENABLE_LED_BASIC
-		if (LED_IsLedDriverChipRunning()) {
-			bForceShowRGBCW = true;
-		}
-#else
-		{
+		if (DRV_IsRunning("DMX")) {
+			bForceShowRGB = true;
 		}
 #endif
 	}
@@ -233,6 +240,7 @@ int http_fn_index(http_request_t* request) {
 
 	// use ?state URL parameter to only request current state
 	if (!http_getArg(request->url, "state", tmpA, sizeof(tmpA))) {
+		// full update - include header
 		http_html_start(request, NULL);
 
 		poststr(request, "<div id=\"changed\">");
@@ -339,13 +347,23 @@ int http_fn_index(http_request_t* request) {
 		poststr(request, "</div>"); // end div#change
 
 
-#if defined(ENABLE_DRIVER_WIDGET)
-		if (DRV_IsRunning("Widget")) {
-			DRV_Widget_BeforeState(request);
-		}
+#if ENABLE_OBK_BERRY
+		void Berry_SaveRequest(http_request_t *r);
+		Berry_SaveRequest(request);
+		CMD_Berry_RunEventHandlers_StrPtr(CMD_EVENT_ON_HTTP, "prestate", request);
 #endif
+#ifndef OBK_DISABLE_ALL_DRIVERS
+		DRV_AppendInformationToHTTPIndexPage(request, true);
+#endif
+
 		poststr(request, "<div id=\"state\">"); // replaceable content follows
 	}
+
+#if ENABLE_OBK_BERRY
+	void Berry_SaveRequest(http_request_t *r);
+	Berry_SaveRequest(request);
+	CMD_Berry_RunEventHandlers_StrPtr(CMD_EVENT_ON_HTTP, "state", request);
+#endif
 
 	if (!CFG_HasFlag(OBK_FLAG_HTTP_NO_ONOFF_WORDS)){
 		poststr(request, "<table>");	//Table default to 100% width in stylesheet
@@ -478,11 +496,64 @@ int http_fn_index(http_request_t* request) {
 				hprintf255(request, "Channel %s = %i", CHANNEL_GetLabel(i), iValue);
 			}
 			poststr(request, "</td></tr>");
+		} else if (channelType == ChType_Enum) {
+			iValue = CHANNEL_Get(i);
+			channelEnum_t *en;
+
+
+			// if setChannelEnum has not been defined, treat ChType_Enum as a textfield
+			if (g_enums == NULL || g_enums[i]->numOptions == 0 ) {
+				//en = g_enums[i];
+				poststr(request, "<tr><td>");
+				hprintf255(request, "<p>Change channel %s enum:</p><form action=\"index\">", CHANNEL_GetLabel(i));
+				hprintf255(request, "<input type=\"hidden\" name=\"setIndex\" value=\"%i\">", i);
+				hprintf255(request, "<input type=\"number\" name=\"set\" value=\"%i\" onblur=\"this.form.submit()\">", iValue);
+				hprintf255(request, "<input type=\"submit\" value=\"Set!\"/></form>");
+				hprintf255(request, "</form>");
+				poststr(request, "</td></tr>");
+			} else {
+				en = g_enums[i];
+
+				poststr(request, "<tr><td>");
+				hprintf255(request, "<form action=\"index\"><label for=\"select%i\">Channel %s Enum:</label>", i, CHANNEL_GetLabel(i));
+				hprintf255(request, "<input type=\"hidden\" name=\"setIndex\" value=\"%i\">", i);
+				hprintf255(request, "<select id=\"select%i\" name=\"set\" onchange=\"this.form.submit()\">", i);
+
+				bool found = false;
+				for (int o = 0; o < en->numOptions; o++) {
+					const char* selected;
+					if (en->options[o].value == iValue) {
+						selected = "selected";
+						found = true;
+					} else
+						selected = "";
+					hprintf255(request, "<option value=\"%i\" %s>%s [%i]</option>", en->options[o].value, selected, en->options[o].label,en->options[o].value);
+				}
+				if (!found) // create an item if no label is found
+					hprintf255(request, "<option value=\"%i\" selected>undefined enum [%i]</option>", iValue,iValue);
+				hprintf255(request, "</select></form>");
+				poststr(request, "</td></tr>");
+			}
+		}
+		else if (channelType == ChType_ReadOnlyEnum) {
+			iValue = CHANNEL_Get(i);
+			const char* oLabel;
+			if (g_enums == NULL || g_enums[i]->numOptions == 0)
+				oLabel = CHANNEL_GetLabel(i);
+			else
+				oLabel = CMD_FindChannelEnumLabel(g_enums[i], iValue);
+
+			poststr(request, "<tr><td>");
+			hprintf255(request, "Channel %s = %s [%i]", CHANNEL_GetLabel(i), oLabel, iValue);
+			poststr(request, "</td></tr>");
 		}
 		else if ((types = Channel_GetOptionsForChannelType(channelType, &numTypes)) != 0) {
 			const char *what;
 			if (channelType == ChType_OffOnRemember) {
 				what = "memory";
+			}
+			else if (channelType == ChType_OpenStopClose || channelType == ChType_StopUpDown) {
+				what = "mode";
 			}
 			else {
 				what = "speed";
@@ -563,7 +634,9 @@ int http_fn_index(http_request_t* request) {
 		else if (h_isChannelRelay(i) || channelType == ChType_Toggle || channelType == ChType_Toggle_Inv) {
 			// HANDLED ABOVE in previous loop
 		}
-		else if ((bRawPWMs && h_isChannelPWM(i)) || (channelType == ChType_Dimmer) || (channelType == ChType_Dimmer256) || (channelType == ChType_Dimmer1000)) {
+		else if ((bRawPWMs && h_isChannelPWM(i)) ||
+			(channelType == ChType_Dimmer) || (channelType == ChType_Dimmer256) || (channelType == ChType_Dimmer1000)
+			|| channelType == ChType_Percent) {
 			int maxValue;
 			// PWM and dimmer both use a slider control
 			inputName = h_isChannelPWM(i) ? "pwm" : "dim";
@@ -635,8 +708,15 @@ int http_fn_index(http_request_t* request) {
 		}
 	}
 
+	bool bForceShowSingleDimmer = 0;
+#if	ENABLE_DRIVER_GOSUNDSW2
+	if (DRV_IsRunning("GosundSW2")) {
+		bForceShowSingleDimmer = 1;
+	}
+#endif
 #if ENABLE_LED_BASIC
-	if (bRawPWMs == 0 || bForceShowRGBCW || bForceShowRGB) {
+	if (bRawPWMs == 0 || bForceShowRGBCW || bForceShowRGB
+		|| bForceShowSingleDimmer || LED_IsLedDriverChipRunning()) {
 		int c_pwms;
 		int lm;
 		int c_realPwms = 0;
@@ -649,7 +729,13 @@ int http_fn_index(http_request_t* request) {
 		// into high power 3-outputs single colors LED controller
 		PIN_get_Relay_PWM_Count(0, &c_pwms, 0);
 		c_realPwms = c_pwms;
-		if (bForceShowRGBCW) {
+		if (LED_IsLedDriverChipRunning()) {
+			c_pwms = CFG_CountLEDRemapChannels();
+		}
+		if (bForceShowSingleDimmer) {
+			c_pwms = 1;
+		} 
+		else if (bForceShowRGBCW) {
 			c_pwms = 5;
 		}
 		else if (bForceShowRGB) {
@@ -757,7 +843,7 @@ int http_fn_index(http_request_t* request) {
 
 	poststr(request, "</table>");
 #ifndef OBK_DISABLE_ALL_DRIVERS
-	DRV_AppendInformationToHTTPIndexPage(request);
+	DRV_AppendInformationToHTTPIndexPage(request, false);
 #endif
 
 	if (1) {
@@ -803,7 +889,7 @@ int http_fn_index(http_request_t* request) {
 		}
 		hprintf255(request, "</h5>");
 	}
-	hprintf255(request, "<h5>Cfg size: %i, change counter: %i, ota counter: %i, incomplete boots: %i (might change to 0 if you wait to 30 sec)!</h5>",
+	hprintf255(request, "<h5>Cfg size: %i, change counter: %i, ota counter: %i, incomplete boots: %i</h5>",
 		sizeof(g_cfg), g_cfg.changeCounter, g_cfg.otaCounter, g_bootFailures);
 
   // display temperature - thanks to giedriuslt
@@ -916,8 +1002,25 @@ typedef enum {
 	}
 	hprintf255(request, "<h5>Reboot reason: %i - %s</h5>", reset_reason, s);
 	hprintf255(request, "<h5>Current fw: FW%i</h5>", current_fw_idx);
-#elif PLATFORM_RTL8710B || PLATFORM_RTL8720D
+#elif PLATFORM_RTL8710B || PLATFORM_RTL8720D || PLATFORM_REALTEK_NEW
 	hprintf255(request, "<h5>Current fw: FW%i</h5>", current_fw_idx + 1);
+#elif PLATFORM_ECR6600
+	RST_TYPE reset_type = hal_get_reset_type();
+	const char* s;
+	switch(reset_type)
+	{
+		case RST_TYPE_POWER_ON:             s = "POWER_ON"; break;
+		case RST_TYPE_FATAL_EXCEPTION:      s = "FATAL_EXCEPTION"; break;
+		case RST_TYPE_SOFTWARE_REBOOT:      s = "SOFTWARE_REBOOT"; break;
+		case RST_TYPE_HARDWARE_REBOOT:      s = "HARDWARE_REBOOT"; break;
+		case RST_TYPE_OTA:                  s = "OTA"; break;
+		case RST_TYPE_WAKEUP:               s = "WAKEUP"; break;
+		case RST_TYPE_HARDWARE_WDT_TIMEOUT: s = "HARDWARE_WDT_TIMEOUT"; break;
+		case RST_TYPE_SOFTWARE_WDT_TIMEOUT: s = "SOFTWARE_WDT_TIMEOUT"; break;
+		case RST_TYPE_UNKOWN:               s = "UNKNOWN"; break;
+		default: s = "ERROR"; break;
+	}
+	hprintf255(request, "<h5>Reboot reason: %i - %s</h5>", reset_type, s);
 #endif
 #if ENABLE_MQTT
 	if (CFG_GetMQTTHost()[0] == 0) {
@@ -941,14 +1044,14 @@ typedef enum {
 		hprintf255(request, "<h5>MQTT State: <span style=\"color:%s\">%s</span> RES: %d(%s)<br>", colorStr,
 			stateStr, MQTT_GetConnectResult(), get_error_name(MQTT_GetConnectResult()));
 		hprintf255(request, "MQTT ErrMsg: %s <br>", (MQTT_GetStatusMessage() != NULL) ? MQTT_GetStatusMessage() : "");
-		hprintf255(request, "MQTT Stats:CONN: %d PUB: %d RECV: %d ERR: %d </h5>", MQTT_GetConnectEvents(),
+		hprintf255(request, "MQTT Stats: CONN: %d PUB: %d RECV: %d ERR: %d </h5>", MQTT_GetConnectEvents(),
 			MQTT_GetPublishEventCounter(), MQTT_GetReceivedEventCounter(), MQTT_GetPublishErrorCounter());
 	}
 #endif
 	/* Format current PINS input state for all unused pins */
 	if (CFG_HasFlag(OBK_FLAG_HTTP_PINMONITOR))
 	{
-		for (i = 0; i < 29; i++)
+		for (i = 0; i < PLATFORM_GPIO_MAX; i++)
 		{
 			if ((PIN_GetPinRoleForPinIndex(i) == IOR_None) && (i != 0) && (i != 1))
 			{
@@ -957,7 +1060,7 @@ typedef enum {
 		}
 
 		hprintf255(request, "<h5> PIN States<br>");
-		for (i = 0; i < 29; i++)
+		for (i = 0; i < PLATFORM_GPIO_MAX; i++)
 		{
 			if ((PIN_GetPinRoleForPinIndex(i) != IOR_None) || (i == 0) || (i == 1))
 			{
@@ -991,16 +1094,10 @@ typedef enum {
 
 #endif
 
-#if WINDOWS
-#elif PLATFORM_BL602
-#elif PLATFORM_W600 || PLATFORM_W800
-#elif PLATFORM_XR809
-#elif PLATFORM_BK7231N || PLATFORM_BK7231T
-	if (ota_progress() >= 0)
+	if (OTA_GetProgress() >= 0)
 	{
-		hprintf255(request, "<h5>OTA In Progress. Downloaded: %i B Flashed: %06lXh</h5>", OTA_GetTotalBytes(), ota_progress());
+		hprintf255(request, "<h5>OTA In Progress. Downloaded: %i B Flashed: %06lXh</h5>", OTA_GetTotalBytes(), OTA_GetProgress());
 	}
-#endif
 	if (bSafeMode) {
 		hprintf255(request, "<h5 class='safe'>You are in safe mode (AP mode) because full reboot failed %i times. ",
 			g_bootFailures);
@@ -1372,7 +1469,7 @@ int http_fn_cfg_wifi(http_request_t* request) {
 			hprintf255(request, "[%i/%i] SSID: %s, Channel: %i, Signal %i<br>", i + 1, (int)num, ar[i].ssid, ar[i].channel, ar[i].rssi);
 		}
 		tuya_os_adapt_wifi_release_ap(ar);
-#elif PLATFORM_ESPIDF
+#elif PLATFORM_ESPIDF || PLATFORM_ESP8266
 		// doesn't work in ap mode, only sta/apsta
 		uint16_t ap_count = 0, number = 30;
 		wifi_ap_record_t ap_info[number];
@@ -1386,7 +1483,7 @@ int http_fn_cfg_wifi(http_request_t* request) {
 		{
 			hprintf255(request, "[%i/%u] SSID: %s, Channel: %i, Signal %i<br>", i + 1, number, ap_info[i].ssid, ap_info[i].primary, ap_info[i].rssi);
 		}
-#elif defined(PLATFORM_REALTEK)
+#elif defined(PLATFORM_REALTEK) && !PLATFORM_REALTEK_NEW
 #ifndef PLATFORM_RTL87X0C
 		extern void rltk_wlan_enable_scan_with_ssid_by_extended_security(bool);
 #endif
@@ -1403,6 +1500,7 @@ int http_fn_cfg_wifi(http_request_t* request) {
 			rtw_scan_result_t* record = &result->ap_details;
 			record->SSID.val[record->SSID.len] = 0;
 			hprintf255(request, "SSID: %s, Channel: %i, Signal %i<br>", record->SSID.val, record->channel, record->signal_strength);
+			return 0;
 		}
 
 		scan_hdl = xSemaphoreCreateBinary();
@@ -1514,6 +1612,7 @@ int http_fn_cfg_wifi_set(http_request_t* request) {
 			bChanged |= CFG_SetWiFiPass(tmpA);
 		}
 		poststr(request, "WiFi mode set: connect to WLAN.");
+		if(bChanged) HAL_DisableEnhancedFastConnect();
 	}
 	if (http_getArg(request->url, "ssid2", tmpA, sizeof(tmpA))) {
 		bChanged |= CFG_SetWiFiSSID2(tmpA);
@@ -1735,6 +1834,50 @@ int http_fn_startup_command(http_request_t* request) {
 #endif
 
 #if ENABLE_HA_DISCOVERY
+HassDeviceInfo *hass_createEnumChannelInfo(int i) {
+	HassDeviceInfo *dev_info = 0;
+	channelEnum_t *en;
+	if (g_enums != NULL && g_enums[i]->numOptions != 0) {
+		en = g_enums[i];
+	}
+	else {
+		// revert to textfield if no enums are defined
+		dev_info = hass_init_textField_info(i);
+		return dev_info;;
+	}
+
+	char **options = (char**)malloc(en->numOptions * sizeof(char *));
+	for (int o = 0; o < en->numOptions; o++) {
+		options[o] = en->options[o].label;
+	}
+
+	if (en->options != NULL && en->numOptions > 0) {
+		// backlog setChannelType 1 Enum; setChannelEnum 0:red 2:blue 3:green; scheduleHADiscovery 1
+		char stateTopic[32];
+		char cmdTopic[32];
+		char title[64];
+		char value_tmp[1024];
+		char command_tmp[1024];
+
+		CMD_GenEnumValueTemplate(en, value_tmp, sizeof(value_tmp));
+		CMD_GenEnumCommandTemplate(en, command_tmp, sizeof(command_tmp));
+
+		strcpy(title, CHANNEL_GetLabel(i));
+		sprintf(stateTopic, "~/%i/get", i);
+		sprintf(cmdTopic, "~/%i/set", i);
+		dev_info = hass_createSelectEntityIndexedCustom(
+			stateTopic,
+			cmdTopic,
+			en->numOptions,
+			(const char**)options,
+			title,
+			value_tmp,
+			command_tmp
+		);
+	}
+	os_free(options);
+	return dev_info;
+}
 void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 	int i;
 	int relayCount;
@@ -1751,7 +1894,7 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 	// warning - this is 32 bit
 	int flagsChannelPublished;
 	int ch;
-	int dimmer, toggle, brightness_scale;
+	int dimmer, toggle, brightness_scale = 0;
 
 	// no channels published yet
 	flagsChannelPublished = 0;
@@ -1769,8 +1912,8 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 
 #ifdef ENABLE_DRIVER_BL0937
 	measuringPower = DRV_IsMeasuringPower();
-	measuringBattery = DRV_IsMeasuringBattery();
 #endif
+	measuringBattery = DRV_IsMeasuringBattery();
 
 	PIN_get_Relay_PWM_Count(&relayCount, &pwmCount, &dInputCount);
 	addLogAdv(LOG_INFO, LOG_FEATURE_HTTP, "HASS counts: %i rels, %i pwms, %i inps, %i excluded", relayCount, pwmCount, dInputCount, excludedCount);
@@ -1781,10 +1924,16 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 	ledDriverChipRunning = 0;
 #endif
 
+#if PLATFORM_TXW81X
+	hooks.malloc_fn = _os_malloc;
+	hooks.free_fn = _os_free;
+#else
 	hooks.malloc_fn = os_malloc;
 	hooks.free_fn = os_free;
+#endif
 	cJSON_InitHooks(&hooks);
 
+	DRV_OnHassDiscovery(topic);
 
 #if ENABLE_ADVANCED_CHANNELTYPES_DISCOVERY
 	// try to pair toggles with dimmers. This is needed only for TuyaMCU, 
@@ -1843,7 +1992,10 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 
 
 #if ENABLE_LED_BASIC
-	if (pwmCount == 5 || ledDriverChipRunning || (pwmCount == 4 && CFG_HasFlag(OBK_FLAG_LED_EMULATE_COOL_WITH_RGB))) {
+	if (ledDriverChipRunning) {
+		pwmCount = CFG_CountLEDRemapChannels();
+	}
+	if (pwmCount == 5 || (pwmCount == 4 && CFG_HasFlag(OBK_FLAG_LED_EMULATE_COOL_WITH_RGB))) {
 		if (dev_info == NULL) {
 			dev_info = hass_init_light_device_info(LIGHT_RGBCW);
 		}
@@ -2009,7 +2161,7 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 			{
 				dev_info = hass_init_sensor_device_info(READONLYLOWMIDHIGH_SENSOR, i, -1, -1, 1);
 			}
-			break; 
+			break;
 			case ChType_BatteryLevelPercent:
 			{
 				dev_info = hass_init_sensor_device_info(BATTERY_CHANNEL_SENSOR, i, -1, -1, 1);
@@ -2122,6 +2274,11 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 				dev_info = hass_init_sensor_device_info(FREQUENCY_SENSOR, i, 3, 2, 1);
 			}
 			break;
+			case ChType_Percent:
+			{
+				dev_info = hass_init_sensor_device_info(HASS_PERCENT, i, 3, 2, 1);
+			}
+			break;
 			case ChType_Frequency_div1000:
 			{
 				dev_info = hass_init_sensor_device_info(FREQUENCY_SENSOR, i, 4, 3, 1);
@@ -2135,6 +2292,16 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 			case ChType_EnergyTotal_kWh_div100:
 			{
 				dev_info = hass_init_sensor_device_info(ENERGY_SENSOR, i, 3, 2, 1);
+			}
+			break;
+			case ChType_EnergyExport_kWh_div1000:
+			{
+				dev_info = hass_init_sensor_device_info(ENERGY_SENSOR, i, 3, 3, 1);
+			}
+			break;
+			case ChType_EnergyImport_kWh_div1000:
+			{
+				dev_info = hass_init_sensor_device_info(ENERGY_SENSOR, i, 3, 3, 1);
 			}
 			break;
 			case ChType_EnergyTotal_kWh_div1000:
@@ -2155,6 +2322,43 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 			case ChType_Tds:
 			{
 				dev_info = hass_init_sensor_device_info(WATER_QUALITY_TDS, i, -1, 2, 1);
+			}
+			break;
+			case ChType_TextField:
+			{
+				dev_info = hass_init_textField_info(i);
+			}
+			break;
+			case ChType_ReadOnlyEnum:
+			{
+				dev_info = hass_init_sensor_device_info(HASS_READONLYENUM, i, -1, -1, -1);
+			}
+			break;
+			case ChType_Enum:
+			{			
+				dev_info = hass_createEnumChannelInfo(i);
+			}
+			break;
+			default:
+			{
+				int numOptions;
+				const char **options = Channel_GetOptionsForChannelType(type, &numOptions);
+				if (options && numOptions) {
+					// backlog setChannelType 2 LowMidHigh; scheduleHADiscovery 1
+					// backlog setChannelType 3 OpenStopClose; scheduleHADiscovery 1
+					char stateTopic[16];
+					char cmdTopic[16];
+					// TODO: lengths
+					sprintf(stateTopic, "~/%i/get", i);
+					sprintf(cmdTopic, "~/%i/set", i);
+					dev_info = hass_createSelectEntityIndexed(
+						stateTopic,
+						cmdTopic,
+						numOptions,
+						options,
+						CHANNEL_GetLabel(i)
+					);
+				}
 			}
 			break;
 		}
@@ -2207,11 +2411,12 @@ void doHomeAssistantDiscovery(const char* topic, http_request_t* request) {
 			}
 		}
 	}
-	if (1) {
+	if(CFG_HasFlag(OBK_FLAG_MQTT_BROADCASTSELFSTATEPERMINUTE) || CFG_HasFlag(OBK_FLAG_MQTT_BROADCASTSELFSTATEONCONNECT)) {
 		//use -1 for channel as these don't correspond to channels
 #ifndef NO_CHIP_TEMPERATURE
 		dev_info = hass_init_sensor_device_info(HASS_TEMP, -1, -1, -1, 1);
 		MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
+		hass_free_device_info(dev_info);
 #endif
 		dev_info = hass_init_sensor_device_info(HASS_RSSI, -1, -1, -1, 1);
 		MQTT_QueuePublish(topic, dev_info->channel, hass_build_discovery_json(dev_info), OBK_PUBLISH_FLAG_RETAIN);
@@ -2557,6 +2762,9 @@ int http_fn_cfg(http_request_t* request) {
 #if ENABLE_HTTP_IP
 	postFormAction(request, "cfg_ip", "Configure IP");
 #endif
+#if (ENABLE_DRIVER_DS1820_FULL)
+	postFormAction(request, "cfg_ds18b20", "Configure DS18B20 Sensors");
+#endif
 	postFormAction(request, "cfg_mqtt", "Configure MQTT");
 #if ENABLE_HTTP_NAMES
 	postFormAction(request, "cfg_name", "Configure Names");
@@ -2617,7 +2825,7 @@ int http_fn_cfg_pins(http_request_t* request) {
 	poststr(request, "<p>The first field assigns a role to the given pin. The next field is used to enter channel index (relay index), used to support multiple relays and buttons. ");
 	poststr(request, "So, first button and first relay should have channel 1, second button and second relay have channel 2, etc.</p>");
 	poststr(request, "<p>Only for button roles another field will be provided to enter channel to toggle when doing double click. ");
-	poststr(request, "It shows up when you change role to button and save.</p>");
+	poststr(request, "It shows up when you change role to button.</p>");
 #if PLATFORM_BK7231N || PLATFORM_BK7231T
 	poststr(request, "<p>BK7231N/BK7231T supports PWM only on pins 6, 7, 8, 9, 24 and 26!</p>");
 #endif
@@ -2811,7 +3019,7 @@ const char* g_obk_flagNames[] = {
 	"[MQTT] Broadcast self state every N (def: 60) seconds (delay configurable by 'mqtt_broadcastInterval' and 'mqtt_broadcastItemsPerSec' commands)",
 	"[LED][Debug] Show raw PWM controller on WWW index instead of new LED RGB/CW/etc picker",
 	"[LED] Force show RGBCW controller (for example, for SM2135 LEDs, or for DGR sender)",
-	"[CMD] Enable TCP console command server (for Putty, etc)",
+	"[CMD] Enable TCP console command server (for PuTTY, etc)",
 	"[BTN] Instant touch reaction instead of waiting for release (aka SetOption 13)",
 	"[MQTT] [Debug] Always set Retain flag to all published values",
 	"[LED] Alternate CW light mode (first PWM for warm/cold slider, second for brightness)",
@@ -2830,7 +3038,7 @@ const char* g_obk_flagNames[] = {
 	"[MQTT] Retain power channels (Relay channels, etc)",
 	"[IR] Do MQTT publish (Tasmota JSON format) for incoming IR data",
 	"[LED] Automatically enable Light on any change of brightness, color or temperature",
-	"[LED] Emulate Cool White with RGB in device with four PWMS - Red is 0, Green 1, Blue 2, and Warm is 4",
+	"[LED] Emulate Cool White with RGB in device with four PWMs - Red is 0, Green 1, Blue 2, and Warm is 4",
 	"[POWER] Allow negative current/power for power measurement (all chips, BL0937, BL0942, etc)",
 	// On BL602, if marked, uses /dev/ttyS1, otherwise S0
 	// On Beken, if marked, uses UART2, otherwise UART1
@@ -2858,7 +3066,8 @@ const char* g_obk_flagNames[] = {
 	"[TuyaMCU] Store ALL data",
 	"[PWR] Invert AC dir",
 	"[HTTP] Hide ON/OFF for relays (only red/green buttons)",
-	"[MQTT] Never add get sufix",
+	"[MQTT] Never add GET suffix",
+	"[WiFi] (RTL/BK) Enhanced fast connect by saving AP data to flash (preferable with Flag 37 & static ip). Quick reset 3 times to connect normally",
 	"error",
 	"error",
 	"error",
@@ -3111,31 +3320,74 @@ int http_fn_cfg_dgr(http_request_t* request) {
 }
 #endif
 
-void XR809_RequestOTAHTTP(const char* s);
-
 void OTA_RequestDownloadFromHTTP(const char* s) {
-#if WINDOWS
-
-#elif PLATFORM_BL602
-
-#elif PLATFORM_LN882H
-
-#elif PLATFORM_ESPIDF
-#elif PLATFORM_TR6260
-#elif PLATFORM_REALTEK
+#if PLATFORM_BEKEN
+	otarequest(s);
 #elif PLATFORM_ECR6600
-	extern int http_client_download_file(const char* url, unsigned int len);
+	extern int http_client_download_file(const char* url);
 	extern int ota_done(bool reset);
 	delay_ms(100);
-	int ret = http_client_download_file(s, strlen(s));
+	int ret = http_client_download_file(s);
 	if(ret != -1) ota_done(1);
 	else ota_done(0);
 #elif PLATFORM_W600 || PLATFORM_W800
 	t_http_fwup(s);
-#elif PLATFORM_XR809
-	XR809_RequestOTAHTTP(s);
-#else
-	otarequest(s);
+#elif PLATFORM_XRADIO
+	uint32_t* verify_value;
+	ota_verify_t      verify_type;
+	ota_verify_data_t verify_data;
+
+	if(ota_get_image(OTA_PROTOCOL_HTTP, s) != OTA_STATUS_OK)
+	{
+		addLogAdv(LOG_ERROR, LOG_FEATURE_HTTP, "OTA http get image failed");
+		return;
+	}
+
+	if(ota_get_verify_data(&verify_data) != OTA_STATUS_OK)
+	{
+		verify_type = OTA_VERIFY_NONE;
+		verify_value = NULL;
+	}
+	else
+	{
+		verify_type = verify_data.ov_type;
+		verify_value = (uint32_t*)(verify_data.ov_data);
+	}
+
+	if(ota_verify_image(verify_type, verify_value) != OTA_STATUS_OK)
+	{
+		addLogAdv(LOG_ERROR, LOG_FEATURE_HTTP, "OTA http verify image failed");
+		return;
+	}
+
+	ota_reboot();
+#elif PLATFORM_REALTEK_NEW
+	ota_context* ctx = NULL;
+	ctx = (ota_context*)malloc(sizeof(ota_context));
+	if(ctx == NULL) goto exit;
+	memset(ctx, 0, sizeof(ota_context));
+	char url[256] = { 0 };
+	char resource[256] = { 0 };
+	uint16_t port;
+	parser_url(s, &url, &port, &resource, 256);
+	int ret = ota_update_init(ctx, &url, port, &resource, OTA_HTTP);
+	if(ret != 0)
+	{
+		addLogAdv(LOG_ERROR, LOG_FEATURE_HTTP, "ota_update_init failed");
+		goto exit;
+	}
+	ret = ota_update_start(ctx);
+	if(!ret)
+	{
+		addLogAdv(LOG_INFO, LOG_FEATURE_HTTP, "OTA finished");
+		sys_clear_ota_signature();
+		delay_ms(50);
+		sys_reset();
+	}
+exit:
+	ota_update_deinit(ctx);
+	addLogAdv(LOG_ERROR, LOG_FEATURE_HTTP, "OTA failed");
+	if(ctx) free(ctx);
 #endif
 }
 int http_fn_ota_exec(http_request_t* request) {
@@ -3175,7 +3427,7 @@ int http_fn_ota(http_request_t* request) {
 #ifdef OBK_OTA_NAME_EXTENSION
 	OBK_OTA_NAME_EXTENSION
 #endif
-	OBK_OTA_EXTENSION "/,SR=R.source,mr=(e)=>e.name.match(R);doota=()=>{f=o.files[0];if(f&&(f)){d.showModal();var t=30;setTimeout(()=>{d.close(),location.href='/'},1e3*t),setInterval(()=>d.innerHTML=D+t--+' secs',1e3),fetch('/api/ota',{method:'POST',body:f}).then((e)=>{e.ok&&fetch('/index?restart=1')})}else alert(f?'filename invalid':'no file selected')};d.innerHTML=D,o.addEventListener('change',((e)=>{const t=e.target.files[0];if(!t)return;h.innerHTML=mr(t)?'':'Selected file does <b>not</b> match reqired format '+SR+'!'}))</script>";
+	OBK_OTA_EXTENSION "/,SR=R.source,mr=(e)=>e.name.match(R);doota=()=>{f=o.files[0];if(f&&(f)){d.showModal();var t=30;setTimeout(()=>{d.close(),location.href='/'},1e3*t),setInterval(()=>d.innerHTML=D+t--+' secs',1e3),fetch('/api/ota',{method:'POST',body:f}).then((e)=>{e.ok&&fetch('/index?restart=1')})}else alert(f?'filename invalid':'no file selected')};d.innerHTML=D,o.addEventListener('change',((e)=>{const t=e.target.files[0];if(!t)return;h.innerHTML=mr(t)?'':'Selected file does <b>not</b> match required format '+SR+'!'}))</script>";
 
 	poststr(request, "<br><br><br>Expert feature: Upload firmware OTA file.<br>If unsure, please use Web App!<br><span id='hint' style='color: yellow;'></span><br><br>");
 	poststr(request, "<input id='otafile' type='file' accept='" OBK_OTA_EXTENSION "'>");
@@ -3190,6 +3442,11 @@ int http_fn_ota(http_request_t* request) {
 
 int http_fn_other(http_request_t* request) {
 	http_setup(request, httpMimeTypeHTML);
+#if ENABLE_OBK_BERRY
+	if (CMD_Berry_RunEventHandlers_StrPtr(CMD_EVENT_ON_HTTP, request->url, request)) {
+		return 0;
+	}
+#endif
 	http_html_start(request, "Not found");
 	poststr(request, "Not found.<br/>");
 	poststr(request, htmlFooterReturnToMainPage);

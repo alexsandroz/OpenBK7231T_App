@@ -225,32 +225,13 @@ addEventHandler OnHold 20 backlog AddChannel 10 2 0 255; DGR_SendBrightness room
 
 */
 
-typedef struct scriptFile_s {
-	char *fname;
-	char *data;
-
-	struct scriptFile_s *next;
-} scriptFile_t;
-
-typedef struct scriptInstance_s {
-	scriptFile_t *curFile;
-	int uniqueID;
-	const char *curLine;
-	int currentDelayMS;
-
-	int waitingForArgument;
-	unsigned short waitingForEvent;
-	char waitingForRelation;
-
-	struct scriptInstance_s *next;
-} scriptInstance_t;
-
 int g_scrBufferSize = 0;
 char *g_scrBuffer = NULL;
 int svm_deltaMS;
 scriptFile_t *g_scriptFiles = 0;
 scriptInstance_t *g_scriptThreads = 0;
 scriptInstance_t *g_activeThread = 0;
+
 
 scriptInstance_t *SVM_RegisterThread() {
 	scriptInstance_t *r;
@@ -275,7 +256,6 @@ scriptInstance_t *SVM_RegisterThread() {
 	r->currentDelayMS = 0;
 	return r;
 }
-
 scriptFile_t *SVM_RegisterFile(const char *fname) {
 	scriptFile_t *r;
 
@@ -308,6 +288,35 @@ scriptFile_t *SVM_RegisterFile(const char *fname) {
 	r->next = g_scriptFiles;
 	g_scriptFiles = r;
 	if(r->data == 0)
+		return 0;
+	return r;
+}
+scriptFile_t *SVM_RegisterFileForText(const char *txt) {
+	scriptFile_t *r;
+
+	r = g_scriptFiles;
+
+	while (r) {
+		if (!strcmp(txt, r->fname)) {
+			return r;
+		}
+		r = r->next;
+	}
+	r = malloc(sizeof(scriptFile_t));
+	memset(r, 0, sizeof(scriptFile_t));
+	r->fname = strdup(txt);
+	r->data = strdup(txt);
+	// convert backlog to script
+	char *p = r->data;
+	while (*p) {
+		if (*p == ';') {
+			*p = '\n';
+		}
+		p++;
+	}
+	r->next = g_scriptFiles;
+	g_scriptFiles = r;
+	if (r->data == 0)
 		return 0;
 	return r;
 }
@@ -371,10 +380,11 @@ void SVM_RunThread(scriptInstance_t *t, int maxLoops) {
 		g_scrBuffer = malloc(g_scrBufferSize + 1);
 	}
 
+
 	while(1) {
 		loop++;
 		// check if "waitFor" was executed last frame
-		if (t->waitingForEvent) {
+		if (t->wait.waitingForEvent) {
 			return;
 		}
 		if(t->curLine == 0) {
@@ -440,7 +450,7 @@ void SVM_RunThreads(int deltaMS) {
 
 	g_activeThread = g_scriptThreads;
 	while(g_activeThread) {
-		if (g_activeThread->waitingForEvent) {
+		if (g_activeThread->wait.waitingForEvent) {
 			// do nothing
 			c_sleep++;
 		}
@@ -448,8 +458,9 @@ void SVM_RunThreads(int deltaMS) {
 			if (g_activeThread->currentDelayMS > 0) {
 				g_activeThread->currentDelayMS -= deltaMS;
 				// the following block is needed to handle with long freezes on simulator
-				if (g_activeThread->currentDelayMS < 0) {
+				if (g_activeThread->currentDelayMS <= 0) {
 					g_activeThread->currentDelayMS = 0;
+					SVM_RunThread(g_activeThread, 20);
 				}
 				c_sleep++;
 			}
@@ -463,50 +474,57 @@ void SVM_RunThreads(int deltaMS) {
 
 	//ADDLOG_INFO(LOG_FEATURE_CMD, "SCR sleep %i, ran %i",c_sleep,c_run);
 }
+bool CheckEventCondition(eventWait_t *w, byte eventCode, int argument) {
+	if (w->waitingForEvent != eventCode) {
+		return false;
+	}
+
+	bool bMatch = false;
+	switch (w->waitingForRelation) {
+			case 0: {
+				if (w->waitingForArgument == argument) {
+					bMatch = true;
+				}
+			}
+			break;
+			case '<': {
+				// waitFor noPingTime < 5
+				if (argument < w->waitingForArgument) {
+					bMatch = true;
+				}
+			}
+			break;
+			case '>': {
+				// waitFor noPingTime > 5
+				if (argument > w->waitingForArgument) {
+					bMatch = true;
+				}
+			}
+			break;
+			case '!': {
+				// waitFor noPingTime ! 5
+				if (argument != w->waitingForArgument) {
+					bMatch = true;
+				}
+			}
+			break;
+	}
+	return bMatch;
+}
 void CMD_Script_ProcessWaitersForEvent(byte eventCode, int argument) {
 	scriptInstance_t *t;
 
+#if ENABLE_OBK_BERRY
+	extern void CMD_Berry_ProcessWaitersForEvent(byte eventCode, int argument);
+	CMD_Berry_ProcessWaitersForEvent(eventCode, argument);
+#endif
 	t = g_scriptThreads;
 
 	while (t) {
-		if (t->waitingForEvent == eventCode) {
-			switch (t->waitingForRelation) {
-				case 0: {
-					if (t->waitingForArgument == argument) {
-						// unlock!
-						t->waitingForArgument = 0;
-						t->waitingForEvent = 0;
-					}
-				}
-				break;
-				case '<': {
-					// waitFor noPingTime < 5
-					if (argument < t->waitingForArgument) {
-						// unlock!
-						t->waitingForArgument = 0;
-						t->waitingForEvent = 0;
-					}
-				}
-				break;
-				case '>': {
-					// waitFor noPingTime > 5
-					if (argument > t->waitingForArgument) {
-						// unlock!
-						t->waitingForArgument = 0;
-						t->waitingForEvent = 0;
-					}
-				}
-				break;
-				case '!': {
-					// waitFor noPingTime ! 5
-					if (argument != t->waitingForArgument) {
-						// unlock!
-						t->waitingForArgument = 0;
-						t->waitingForEvent = 0;
-					}
-				}
-				 break;
-			}
+		if(CheckEventCondition(&t->wait,eventCode,argument)) {
+			// unlock!
+			t->wait.waitingForArgument = 0;
+			t->wait.waitingForEvent = 0;
 		}
 		t = t->next;
 	}
@@ -558,10 +576,10 @@ void SVM_StopAllScripts() {
 		t->curFile = 0;
 		t->uniqueID = 0;
 		t->currentDelayMS = 0;
-
 		t = t->next;
 	}
 }
+
 void SVM_StopScripts(int id, int bExcludeSelf) {
 	scriptInstance_t *t;
 
@@ -590,10 +608,56 @@ void SVM_GoToLocal(scriptInstance_t *th, const char *label) {
 
 	return;
 }
+int hasExtension(const char *fname, const char *ext) {
+	size_t len_fname = strlen(fname);
+	size_t len_ext = strlen(ext);
+	return (len_fname >= len_ext && strcmp(fname + len_fname - len_ext, ext) == 0);
+}
+void SVM_StartBacklog(const char *command) {
+	scriptFile_t *f;
+	scriptInstance_t *th;
+
+	f = SVM_RegisterFileForText(command);
+	if (f == 0) {
+		ADDLOG_INFO(LOG_FEATURE_CMD, "SVM_StartBacklog: failed to alloc file");
+		return ;
+	}
+	if (f->data == 0) {
+		ADDLOG_INFO(LOG_FEATURE_CMD, "SVM_StartBacklog: failed to alloc file");
+		return ;
+	}
+	th = SVM_RegisterThread();
+	if (th == 0) {
+		ADDLOG_INFO(LOG_FEATURE_CMD, "SVM_StartBacklog: failed to alloc thread");
+		return ;
+	}
+	th->uniqueID = 0;
+	th->curFile = f;
+	th->curLine = f->data;
+	//return th;
+}
 scriptInstance_t *SVM_StartScript(const char *fname, const char *label, int uniqueID) {
 	scriptFile_t *f;
 	scriptInstance_t *th;
 
+#if 1
+	// allow "startScript test.be" as a shorthand for "berry import test"
+#if ENABLE_OBK_BERRY
+	if (hasExtension(fname, ".be")) {
+		// berry does not like slash?
+		if (*fname == '/' || *fname == '\\') {
+			fname++;
+		}
+		char tmp[64];
+		sprintf(tmp, "berry import %s",fname);
+		tmp[strlen(tmp) - 3] = 0;
+		// strip .be
+		ADDLOG_INFO(LOG_FEATURE_CMD, "CMD_StartScript: will run %s", tmp);
+		CMD_ExecuteCommand(tmp,0);
+		return NULL;
+	}
+#endif
+#endif
 	f = SVM_RegisterFile(fname);
 	if(f == 0) {
 		ADDLOG_INFO(LOG_FEATURE_CMD, "CMD_StartScript: failed to get file %s",fname);
@@ -817,15 +881,32 @@ static commandResult_t CMD_StopAllScripts(const void *context, const char *cmd, 
 
 	return CMD_RES_OK;
 }
+void CMD_StopBerry();
+
 commandResult_t CMD_resetSVM(const void *context, const char *cmd, const char *args, int cmdFlags){
 
-
+#if ENABLE_OBK_BERRY
+	CMD_StopBerry();
+#endif
 	// stop scripts
 	SVM_StopAllScripts();
 	// clear files
 	SVM_FreeAllFiles();
 
 	return CMD_RES_OK;
+}
+
+// Helper function to parse relation character for scripts and event handlers
+char parseRelationChar(const char *relationStr) {
+    if (*relationStr == '<') {
+        return '<';
+    } else if (*relationStr == '>') {
+        return '>';
+    } else if (*relationStr == '!') {
+        return '!';
+    } else {
+        return 0;
+    }
 }
 commandResult_t CMD_waitFor(const void *context, const char *cmd, const char *args, int cmdFlags) {
 	const char *s;
@@ -851,26 +932,19 @@ commandResult_t CMD_waitFor(const void *context, const char *cmd, const char *ar
 		return CMD_RES_BAD_ARGUMENT;
 	}
 	s = Tokenizer_GetArg(1);
-	if (*s == '<') {
-		relation = '<';
-	} else if (*s == '>') {
-		relation = '>';
-	} else if (*s == '!') {
-		relation = '!';
-	} else {
-		relation = 0;
-	}
+	relation = parseRelationChar(s);
 	if (relation) {
 		s = Tokenizer_GetArg(2);
 	}
 	reqArg = atoi(s);
 	
-	g_activeThread->waitingForEvent = eventCode;
-	g_activeThread->waitingForArgument = reqArg;
-	g_activeThread->waitingForRelation = relation;
+	g_activeThread->wait.waitingForEvent = eventCode;
+	g_activeThread->wait.waitingForArgument = reqArg;
+	g_activeThread->wait.waitingForRelation = relation;
 
 	return CMD_RES_OK;
 }
+
 void CMD_InitScripting(){
 	//cmddetail:{"name":"startScript","args":"[FileName][Label][UniqueID]",
 	//cmddetail:"descr":"Starts a script thread from given file, at given label - can be * for whole file, with given unique ID",
@@ -922,7 +996,4 @@ void CMD_InitScripting(){
 	//cmddetail:"fn":"CMD_waitFor","file":"cmnds/cmd_script.c","requires":"",
 	//cmddetail:"examples":""}
 	CMD_RegisterCommand("waitFor", CMD_waitFor, NULL);
-
 }
-
-

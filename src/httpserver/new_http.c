@@ -7,7 +7,7 @@
 #include "http_fns.h"
 #include "../new_pins.h"
 #include "../new_cfg.h"
-#include "../ota/ota.h"
+#include "../hal/hal_ota.h"
 #include "../hal/hal_wifi.h"
 #include "../base64/base64.h"
 #include "http_basic_auth.h"
@@ -295,6 +295,17 @@ void http_setup(http_request_t* request, const char* type) {
 	poststr(request, "\r\n"); // end headers with double CRLF
 	poststr(request, "\r\n");
 }
+void http_setup_gz(http_request_t* request, const char* type) {
+	hprintf255(request, httpHeader, request->responseCode, type);
+	poststr(request, "\r\n"); // next header
+	poststr(request, httpCorsHeaders);
+	poststr(request, "\r\n");
+	poststr(request, "Content-Encoding: gzip");
+	poststr(request, "\r\n");
+	poststr(request, "Connection: close");
+	poststr(request, "\r\n"); // end headers with double CRLF
+	poststr(request, "\r\n");
+}
 
 void http_html_start(http_request_t* request, const char* pagename) {
 	poststr(request, htmlDoctype);
@@ -314,7 +325,7 @@ void http_html_start(http_request_t* request, const char* pagename) {
 }
 
 
-const char pageScriptPart1[] = "<script type='text/javascript'>var firstTime,lastTime,onlineFor,req=null,onlineForEl=null,getElement=e=>document.getElementById(e);function showState(){clearTimeout(firstTime),clearTimeout(lastTime),null!=req&&req.abort(),(e=getElement(\"state\"))&&((req=new XMLHttpRequest).onreadystatechange=()=>{4==req.readyState&&\"OK\"==req.statusText&&((\"INPUT\"!=document.activeElement.tagName||\"number\"!=document.activeElement.type&&\"color\"!=document.activeElement.type)&&(e.innerHTML=req.responseText),clearTimeout(firstTime),clearTimeout(lastTime),lastTime=setTimeout(showState,";
+const char pageScriptPart1[] = "<script type='text/javascript'>var firstTime,lastTime,onlineFor,req=null,onlineForEl=null,getElement=e=>document.getElementById(e);function showState(){clearTimeout(firstTime),clearTimeout(lastTime),null!=req&&req.abort(),(e=getElement(\"state\"))&&((req=new XMLHttpRequest).onreadystatechange=()=>{4==req.readyState&&\"OK\"==req.statusText&&(\"SELECT\"!=document.activeElement.tagName&&(\"INPUT\"!=document.activeElement.tagName||\"number\"!=document.activeElement.type&&\"color\"!=document.activeElement.type)&&(e.innerHTML=req.responseText),clearTimeout(firstTime),clearTimeout(lastTime),lastTime=setTimeout(showState,";
 const char pageScriptPart2[] = "))},req.open(\"GET\",\"index?state=1\",!0),req.send()),firstTime=setTimeout(showState,";
 const char pageScriptPart3[] = ")}function fmtUpTime(e){var t,n,o=Math.floor(e/86400);return e%=86400,t=Math.floor(e/3600),e%=3600,n=Math.floor(e/60),e=e%60,0<o?o+` days, ${t} hours, ${n} minutes and ${e} seconds`:0<t?t+` hours, ${n} minutes and ${e} seconds`:0<n?n+` minutes and ${e} seconds`:`just ${e} seconds`}function updateOnlineFor(){onlineForEl.textContent=fmtUpTime(++onlineFor)}function onLoad(){(onlineForEl=getElement(\"onlineFor\"))&&(onlineFor=parseInt(onlineForEl.dataset.initial,10))&&setInterval(updateOnlineFor,1e3),showState()}function submitTemperature(e){var t=getElement(\"form132\");getElement(\"kelvin132\").value=Math.round(1e6/parseInt(e.value)),t.submit()}window.addEventListener(\"load\",onLoad),history.pushState(null,\"\",window.location.pathname.slice(1)),setTimeout(()=>{var e=getElement(\"changed\");e&&(e.innerHTML=\"\")},5e3);</script>";
 
@@ -540,6 +551,14 @@ const char* htmlPinRoleNames[] = {
 	"KP18058_DAT",
 	"DS1820_IO",
 	"PWM_ScriptOnly",
+	"PWM_ScriptOnly_n",
+	"Counter_f",
+	"Counter_r",
+	"IRRecv_nPup",
+	"StripState",
+	"StripState_n",
+	"HLW_8112_SCSN",
+	"error",
 	"error",
 	"error",
 };
@@ -595,12 +614,15 @@ int postany(http_request_t* request, const char* str, int len) {
 	int currentlen;
 	int addlen = len;
 
+	//ADDLOG_ERROR(LOG_FEATURE_HTTP, "postany: got %i", len);
+
 	if (NULL == str) {
 		// fd will be NULL for unit tests where HTTP packet is faked locally
 		if (request->fd == 0) {
 			return request->replylen;
 		}
 		if (request->replylen > 0) {
+			//ADDLOG_ERROR(LOG_FEATURE_HTTP, "postany: send %i", request->replylen);
 			send(request->fd, request->reply, request->replylen, 0);
 		}
 		request->reply[0] = 0;
@@ -610,6 +632,7 @@ int postany(http_request_t* request, const char* str, int len) {
 
 	currentlen = request->replylen;
 	if (currentlen + addlen >= request->replymaxlen) {
+		//ADDLOG_ERROR(LOG_FEATURE_HTTP, "postany: send %i", request->replylen);
 		send(request->fd, request->reply, request->replylen, 0);
 		request->reply[0] = 0;
 		request->replylen = 0;
@@ -617,9 +640,11 @@ int postany(http_request_t* request, const char* str, int len) {
 	}
 	while (addlen >= request->replymaxlen) {
 		if (request->replylen > 0) {
+			//ADDLOG_ERROR(LOG_FEATURE_HTTP, "postany: send %i", request->replylen);
 			send(request->fd, request->reply, request->replylen, 0);
 			request->replylen = 0;
 		}
+		//ADDLOG_ERROR(LOG_FEATURE_HTTP, "postany: send %i", (request->replymaxlen - 1));
 		send(request->fd, str, (request->replymaxlen - 1), 0);
 		addlen -= (request->replymaxlen - 1);
 		str += (request->replymaxlen - 1);
@@ -807,8 +832,19 @@ int HTTP_ProcessPacket(http_request_t* request) {
 	}
 
 	if (http_basic_auth_run(request) == HTTP_BASIC_AUTH_FAIL) {
+		ADDLOG_ERROR(LOG_FEATURE_HTTP, "HTTP packet with auth fail\n");
 		return 0;
 	}
+
+#if ENABLE_HTTP_OVERRIDE
+	bool HTTP_checkLFSOverride(http_request_t* request, const char *ext);
+	if (HTTP_checkLFSOverride(request,".html")) {
+		return 1;
+	}
+	if (HTTP_checkLFSOverride(request, "")) {
+		return 1;
+	}
+#endif
 
 	if (http_checkUrlBase(urlStr, "")) return http_fn_empty_url(request);
 
@@ -823,6 +859,12 @@ int HTTP_ProcessPacket(http_request_t* request) {
 #endif
 #if ENABLE_HTTP_IP
 	if (http_checkUrlBase(urlStr, "cfg_ip")) return http_fn_cfg_ip(request);
+#endif
+#if (ENABLE_DRIVER_DS1820_FULL)
+	// including "../driver/drv_ds1820_simple.h" will complain about typedefs not used here 
+	// so lets declare it "extern"
+	extern int http_fn_cfg_ds18b20(http_request_t* request);
+	if (http_checkUrlBase(urlStr, "cfg_ds18b20")) return http_fn_cfg_ds18b20(request);
 #endif
 
 #if ENABLE_HTTP_WEBAPP

@@ -8,7 +8,7 @@
 #include "../cmnds/cmd_public.h"
 #include "../httpserver/new_http.h"
 #include "../logging/logging.h"
-#include "../ota/ota.h"
+#include "../hal/hal_ota.h"
 
 #include "drv_ntp.h"
 
@@ -166,6 +166,23 @@ void NTP_CalculateSunset(byte *outHour, byte *outMinute) {
 }
 #endif
 
+#if ENABLE_NTP_SUNRISE_SUNSET && ENABLE_NTP_DST
+// in case a DST switch happens, we should change future events of sunset/sunrise, since this will be different after a switch
+// since we calculated the events in advance, we need to "fix" all events, postulating the DST switch happens allways before a days sunrise and sunset
+void fix_DSTforEvents(int hours){
+	ntpEvent_t *e;
+	e = ntp_events;
+	while (e) {
+//		addLogAdv(LOG_INFO, LOG_FEATURE_CMD,"fix_DSTforEvents(%i) - testing  %s",hours,e->command);
+		if (e->command && e->sunflags) {	// only for (future) sunflag events
+//		addLogAdv(LOG_INFO, LOG_FEATURE_CMD,"fix_DSTforEvents(%i) - fixing  %s",hours,e->command);
+			e->hour += hours;
+		}
+		e = e->next;
+	}
+}
+#endif
+
 void NTP_RunEventsForSecond(time_t runTime) {
 	ntpEvent_t *e;
 	struct tm *ltm;
@@ -186,7 +203,7 @@ void NTP_RunEventsForSecond(time_t runTime) {
 				// weekday check
 				if (BIT_CHECK(e->weekDayFlags, ltm->tm_wday)) {
 #if ENABLE_NTP_SUNRISE_SUNSET
-					if (e->sunflags & (SUNRISE_FLAG || SUNSET_FLAG)) {
+					if (e->sunflags) {
 						if (e->lastDay != ltm->tm_wday) {
 							e->lastDay = ltm->tm_wday;  /* stop any further sun events today */
 							dusk2Dawn(&sun_data, e->sunflags, &e->hour, &e->minute,
@@ -437,8 +454,19 @@ int NTP_PrintEventList() {
 
 	while (e) {
 		// Print the command
-		addLogAdv(LOG_INFO, LOG_FEATURE_CMD, "Ev %i - %i:%i:%i, days 0x%02x, cmd %s\n", (int)e->id, (int)e->hour, (int)e->minute, (int)e->second, (int)e->weekDayFlags, e->command);
-
+#if ENABLE_CLOCK_SUNRISE_SUNSET
+		char sun[25] = {0};
+		if (e->sunflags) {
+			if (e->sunflags & SUNRISE_FLAG){
+				sprintf(sun," (sunrise)");
+			} else{
+				sprintf(sun," (sunset)");
+			}
+		}
+		addLogAdv(LOG_INFO, LOG_FEATURE_CMD, "Ev %i - %02i:%02i:%02i%s, days 0x%02x, cmd %s\n", (int)e->id, (int)e->hour, (int)e->minute, (int)e->second, sun, (int)e->weekDayFlags, e->command);
+#else
+		addLogAdv(LOG_INFO, LOG_FEATURE_CMD, "Ev %i - %02i:%02i:%02i, days 0x%02x, cmd %s\n", (int)e->id, (int)e->hour, (int)e->minute, (int)e->second, (int)e->weekDayFlags, e->command);
+#endif
 		t++;
 		e = e->next;
 	}
@@ -486,7 +514,7 @@ void NTP_Init_Events() {
 	//cmddetail:"examples":""}
 	CMD_RegisterCommand("addClockEvent",CMD_NTP_AddClockEvent, NULL);
 	//cmddetail:{"name":"removeClockEvent","args":"[ID]",
-	//cmddetail:"descr":"Removes clock event wtih given ID",
+	//cmddetail:"descr":"Removes clock event with given ID",
 	//cmddetail:"fn":"CMD_NTP_RemoveClockEvent","file":"driver/drv_ntp_events.c","requires":"",
 	//cmddetail:"examples":""}
 	CMD_RegisterCommand("removeClockEvent", CMD_NTP_RemoveClockEvent, NULL);

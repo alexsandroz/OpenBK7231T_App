@@ -8,7 +8,7 @@ void NTP_OnEverySecond();
 // returns number of seconds passed after 1900
 unsigned int NTP_GetCurrentTime();
 unsigned int NTP_GetCurrentTimeWithoutOffset();
-void NTP_AppendInformationToHTTPIndexPage(http_request_t* request);
+void NTP_AppendInformationToHTTPIndexPage(http_request_t* request, int bPreState);
 bool NTP_IsTimeSynced();
 int NTP_GetTimesZoneOfsSeconds();
 int NTP_GetWeekDay();
@@ -33,6 +33,11 @@ int Time_IsDST();
 // only after setting g_ntpTime freshly from an NTP packet	--> call setDST(0)
 // we must not alter g_ntpTime inside setDST in this case (the old offsets are no longer valid)
 uint32_t setDST(bool setNTP);
+#if ENABLE_NTP_SUNRISE_SUNSET
+// in case a DST switch happens, we should change future events of sunset/sunrise, since this will be different after a switch
+// since we calculated the events in advance, we need to "fix" all events, postulating the DST switch is allways before a days sunrise and sunset
+void fix_DSTforEvents(int hours);
+#endif
 #endif
 
 extern time_t g_ntpTime;

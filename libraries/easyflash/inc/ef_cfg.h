@@ -109,12 +109,59 @@
 #elif PLATFORM_RTL8720D
 
 #define EF_START_ADDR             0x1B0000
-#define ENV_AREA_SIZE             0x50000
+#define ENV_AREA_SIZE             0x40000
+
+#elif PLATFORM_W800
+
+#define EF_START_ADDR             0x1DB000
+// extend to 0x21000 if moving obk config to ef
+#define ENV_AREA_SIZE             0x15000
+
+#elif PLATFORM_XR809
+
+#define EF_START_ADDR             0x1E0000
+#define ENV_AREA_SIZE             0x10000
+
+#elif PLATFORM_XR806
+
+#define EF_START_ADDR             0x1F0000
+#define ENV_AREA_SIZE             0x10000
+
+#elif PLATFORM_XR872
+
+#define EF_START_ADDR             0xEF000
+#define ENV_AREA_SIZE             0x8000
+
+#elif PLATFORM_TXW81X
+
+#define EF_START_ADDR             0xEF000
+#define ENV_AREA_SIZE             0x6000
+
+#elif PLATFORM_RDA5981
+
+#define EF_START_ADDR             0xF4000
+#define ENV_AREA_SIZE             0xA000
+
+#elif WINDOWS
+
+#define EF_START_ADDR             0
+extern uint32_t ENV_AREA_SIZE;
+#define DllExport __declspec(dllexport)
+
+#elif LINUX
+
+#define EF_START_ADDR             0
+extern uint32_t ENV_AREA_SIZE;
+#define DllExport __attribute__((dllexport))
 
 #endif
 /* print debug information of flash */
 #ifdef PKG_EASYFLASH_DEBUG
 #define PRINT_DEBUG
+#endif
+
+#ifndef DllExport
+#define DllExport
 #endif
 
 #endif /* EF_CFG_H_ */

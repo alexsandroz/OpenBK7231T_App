@@ -20,8 +20,24 @@
 #ifdef PLATFORM_BEKEN
 #include <gpio_pub.h>
 #include "driver/drv_ir.h"
-#elif PLATFORM_ESPIDF
+#elif PLATFORM_ESPIDF || PLATFORM_ESP8266
+#include "hal/espidf/hal_pinmap_espidf.h"
 #include "esp_sleep.h"
+#include "esp_wifi.h"
+#elif PLATFORM_XRADIO
+#undef HAL_ADC_Init
+#include "hal/xradio/hal_pinmap_xradio.h"
+#include "driver/chip/hal_gpio.h"
+#include "driver/chip/hal_wakeup.h"
+#include "pm/pm.h"
+#if PLATFORM_XR809
+#define DEEP_SLEEP PM_MODE_POWEROFF
+#else
+#define DEEP_SLEEP PM_MODE_HIBERNATION
+#endif
+#elif PLATFORM_BL602
+#include "bl_flash.h"
+#include "bl602_hbn.h"
 #endif
 
 #ifdef PLATFORM_BEKEN_NEW
@@ -144,6 +160,27 @@ static byte g_lastValidState[PLATFORM_GPIO_MAX];
 uint32_t g_gpio_index_map[2] = { 0, 0 };
 uint32_t g_gpio_edge_map[2] = { 0, 0 }; // note: 0->rising, 1->falling
 
+#if PLATFORM_XRADIO
+void SetWUPIO(int index, int pull, int edge)
+{
+	if(g_pins[index].wakeup != -1)
+	{
+		GPIO_InitParam param;
+
+		param.mode = GPIOx_Pn_F6_EINT;
+		param.driving = GPIO_DRIVING_LEVEL_1;
+		param.pull = pull;
+		HAL_GPIO_Init(GPIO_PORT_A, g_pins[index].pin, &param);
+#if !PLATFORM_XR809
+		HAL_PRCM_SetWakeupDebClk0(0);
+		HAL_PRCM_SetWakeupIOxDebSrc(g_pins[index].wakeup, 0);
+		HAL_PRCM_SetWakeupIOxDebounce(g_pins[index].wakeup, 1);
+#endif
+		HAL_Wakeup_SetIO(g_pins[index].wakeup, !edge, pull);
+		//addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Waking up from PA%i, pull: %i, edge: %i", g_pins[index].pin, pull, !edge);
+	}
+}
+#endif
 
 void setGPIActive(int index, int active, int falling) {
 	if (active) {
@@ -205,19 +242,26 @@ void PINS_BeginDeepSleepWithPinWakeUp(unsigned int wakeUpTime) {
 			else {
 				falling = g_defaultWakeEdge[i];
 			}
+#if PLATFORM_XRADIO
+			int pull = 1;
+			if(g_cfg.pins.roles[i] == IOR_DoorSensorWithDeepSleep_NoPup
+				|| g_cfg.pins.roles[i] == IOR_DigitalInput_NoPup
+				|| g_cfg.pins.roles[i] == IOR_DigitalInput_NoPup_n)
+			{
+				pull = 0;
+			}
+			else if(g_cfg.pins.roles[i] == IOR_DoorSensorWithDeepSleep_pd)
+			{
+				pull = 2;
+			}
+			SetWUPIO(i, pull, falling);
+#else
 			setGPIActive(i, 1, falling);
+#endif
 		}
 	}
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Index map: %i, edge: %i", g_gpio_index_map[0], g_gpio_edge_map[0]);
-#ifdef PLATFORM_BEKEN
-	// NOTE: this function:
-	// void bk_enter_deep_sleep(UINT32 gpio_index_map,UINT32 gpio_edge_map)
-	// On BK7231T, will overwrite HAL pin settings, and depending on edge map,
-	// will set a internal pullup or internall pulldown
-#ifdef PLATFORM_BK7231T
-	extern void deep_sleep_wakeup_with_gpio(UINT32 gpio_index_map, UINT32 gpio_edge_map);
-	deep_sleep_wakeup_with_gpio(g_gpio_index_map[0], g_gpio_edge_map[0]);
-#elif PLATFORM_BEKEN_NEW
+#ifdef PLATFORM_BEKEN_NEW
 	PS_DEEP_CTRL_PARAM params;
 	params.gpio_index_map = g_gpio_index_map[0];
 	params.gpio_edge_map = g_gpio_edge_map[0];
@@ -226,13 +270,20 @@ void PINS_BeginDeepSleepWithPinWakeUp(unsigned int wakeUpTime) {
 	{
 		params.wake_up_way = PS_DEEP_WAKEUP_GPIO | PS_DEEP_WAKEUP_RTC;
 		params.sleep_time = wakeUpTime;
-		bk_enter_deep_sleep_mode(&params);
 	}
 	else
 	{
 		params.wake_up_way = PS_DEEP_WAKEUP_GPIO;
-		bk_enter_deep_sleep_mode(&params);
 	}
+	bk_enter_deep_sleep_mode(&params);
+#elif PLATFORM_BEKEN
+	// NOTE: this function:
+	// void bk_enter_deep_sleep(UINT32 gpio_index_map,UINT32 gpio_edge_map)
+	// On BK7231T, will overwrite HAL pin settings, and depending on edge map,
+	// will set a internal pullup or internall pulldown
+#ifdef PLATFORM_BK7231T
+	extern void deep_sleep_wakeup_with_gpio(UINT32 gpio_index_map, UINT32 gpio_edge_map);
+	deep_sleep_wakeup_with_gpio(g_gpio_index_map[0], g_gpio_edge_map[0]);
 #else
 	extern void bk_enter_deep_sleep(UINT32 g_gpio_index_map, UINT32 g_gpio_edge_map);
 	extern void deep_sleep_wakeup(const UINT32* g_gpio_index_map,
@@ -246,6 +297,12 @@ void PINS_BeginDeepSleepWithPinWakeUp(unsigned int wakeUpTime) {
 		bk_enter_deep_sleep(g_gpio_index_map[0], g_gpio_edge_map[0]);
 	}
 #endif
+#elif PLATFORM_XRADIO
+	if(wakeUpTime)
+	{
+		HAL_Wakeup_SetTimer_mS(wakeUpTime * DS_MS_TO_S);
+	}
+	pm_enter_mode(DEEP_SLEEP);
 #elif PLATFORM_ESPIDF
 //	if(wakeUpTime)
 //	{
@@ -259,6 +316,31 @@ void PINS_BeginDeepSleepWithPinWakeUp(unsigned int wakeUpTime) {
 //	esp_sleep_enable_gpio_wakeup();
 //	esp_light_sleep_start();
 //#endif
+#elif PLATFORM_BL602
+	uint8_t wkup = HBN_WAKEUP_GPIO_NONE;
+	HBN_GPIO_INT_Trigger_Type edge = HBN_GPIO_INT_TRIGGER_ASYNC_RISING_EDGE;
+	uint8_t g7 = (g_gpio_index_map[0] >> 7) & 1;
+	uint8_t g8 = (g_gpio_index_map[0] >> 8) & 1;
+	uint8_t gf7 = (g_gpio_edge_map[0] >> 7) & 1;
+	uint8_t gf8 = (g_gpio_edge_map[0] >> 8) & 1;
+	if(g7) wkup |= HBN_WAKEUP_GPIO_7;
+	if(g8) wkup |= HBN_WAKEUP_GPIO_8;
+	// only one edge setting
+	if(gf8) edge = HBN_GPIO_INT_TRIGGER_ASYNC_FALLING_EDGE;
+	if(gf7) edge = HBN_GPIO_INT_TRIGGER_ASYNC_FALLING_EDGE;
+
+	HBN_APP_CFG_Type cfg = {
+		.useXtal32k = 0,
+		.sleepTime = wakeUpTime,
+		.gpioWakeupSrc = wkup,
+		.gpioTrigType = edge,
+		.flashCfg = bl_flash_get_flashCfg(),
+		.hbnLevel = wakeUpTime > 0 ? HBN_LEVEL_1 : HBN_LEVEL_3,
+		.ldoLevel = HBN_LDO_LEVEL_1P10V,
+	};
+	HBN_Clear_IRQ(HBN_INT_GPIO7);
+	HBN_Clear_IRQ(HBN_INT_GPIO8);
+	HBN_Mode_Enter(&cfg);
 #endif
 }
 
@@ -327,6 +409,9 @@ void PIN_SetupPins() {
 	// TODO: better place to call?
 	DHT_OnPinsConfigChanged();
 #endif
+#if ENABLE_LED_BASIC
+	LED_SetStripStateOutputs();
+#endif
 	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "PIN_SetupPins pins have been set up.\r\n");
 }
 
@@ -394,7 +479,8 @@ int PIN_IOR_NofChan(int test){
 			|| test == IOR_BL0937_CF || test == IOR_BL0937_CF1 || test == IOR_BL0937_SEL
 			|| test == IOR_LED_WIFI || test == IOR_LED_WIFI_n || test == IOR_LED_WIFI_n
 			|| (test >= IOR_IRRecv && test <= IOR_DHT11)
-			|| (test >= IOR_SM2135_DAT && test <= IOR_BP1658CJ_CLK)) {
+			|| (test >= IOR_SM2135_DAT && test <= IOR_BP1658CJ_CLK)
+			|| (test == IOR_HLW8112_SCSN)) {
 			return 0;
 	}
 	// all others have 1 channel
@@ -684,6 +770,34 @@ void CHANNEL_SetFirstChannelByTypeEx(int requiredType, int newVal, int ausemovin
 	}
 }
 
+int CHANNEL_FindIndexForPinType(int requiredType) {
+	int i;
+	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
+		if (g_cfg.pins.roles[i] == requiredType) {
+			return g_cfg.pins.channels[i];
+		}
+	}
+	return -1;
+}
+
+int CHANNEL_FindIndexForPinType2(int requiredType, int requiredType2) {
+	int i;
+	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
+		if (g_cfg.pins.roles[i] == requiredType || g_cfg.pins.roles[i] == requiredType2) {
+			return g_cfg.pins.channels[i];
+		}
+	}
+	return -1;
+}
+int CHANNEL_FindIndexForType(int requiredType) {
+	int i;
+	for (i = 0; i < CHANNEL_MAX; i++) {
+		if (CHANNEL_GetType(i) == requiredType) {
+			return i;
+		}
+	}
+	return -1;
+}
 void CHANNEL_SetFirstChannelByType(int requiredType, int newVal) {
 	CHANNEL_SetFirstChannelByTypeEx(requiredType, newVal, 0);
 }
@@ -724,6 +838,7 @@ void CHANNEL_SetAll(int iVal, int iFlags) {
 		case IOR_PWM:
 		case IOR_PWM_ScriptOnly:
 		case IOR_PWM_n:
+		case IOR_PWM_ScriptOnly_n:
 			CHANNEL_Set(g_cfg.pins.channels[i], iVal, iFlags);
 			break;
 		case IOR_BridgeForward:
@@ -775,6 +890,34 @@ void CHANNEL_DoSpecialToggleAll() {
 	}
 }
 extern int g_pwmFrequency;
+
+#if 0
+void PIN_InterruptHandler(int gpio) {
+	int ch = g_cfg.pins.channels[gpio];
+	CHANNEL_Add(ch, 1);
+}
+#else
+
+
+#endif
+
+unsigned short g_counterDeltas[PLATFORM_GPIO_MAX];
+void PIN_InterruptHandler(int gpio) {
+	g_counterDeltas[gpio]++;
+}
+void PIN_ApplyCounterDeltas() {
+	for (int i = 0; i < PLATFORM_GPIO_MAX; i++) {
+		if (g_counterDeltas[i]) {
+			// TODO: disable interrupts now so it won't get called in meantime?
+			int delta = g_counterDeltas[i];
+			g_counterDeltas[i] = 0;
+			int ch = g_cfg.pins.channels[i];
+			CHANNEL_Add(ch, delta);
+		}
+	}
+}
+
+
 
 void PIN_SetPinRoleForPinIndex(int index, int role) {
 	bool bDHTChange = false;
@@ -841,14 +984,18 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 			// Disable PWM for previous pin role
 		case IOR_PWM_n:
 		case IOR_PWM_ScriptOnly:
+		case IOR_PWM_ScriptOnly_n:
 		case IOR_PWM:
-		{
 			HAL_PIN_PWM_Stop(index);
-		}
-		break;
+			break;
 		case IOR_BAT_ADC:
+		case IOR_ADC_Button:
 		case IOR_ADC:
-			// TODO: disable?
+			HAL_ADC_Deinit(index);
+			break;
+		case IOR_Counter_f:
+		case IOR_Counter_r:
+			HAL_DetachInterrupt(index);
 			break;
 		case IOR_BridgeForward:
 		case IOR_BridgeReverse:
@@ -998,6 +1145,20 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 			}
 		}
 		break;
+#if ENABLE_LED_BASIC
+		case IOR_StripState:
+		case IOR_StripState_n:
+		{
+			HAL_PIN_Setup_Output(index);
+			if (role == IOR_StripState) {
+				HAL_PIN_SetOutputValue(index, LED_GetEnableAll());
+			}
+			else {
+				HAL_PIN_SetOutputValue(index, !LED_GetEnableAll());
+			}
+		}
+		break;
+#endif
 		case IOR_BridgeForward:
 		case IOR_BridgeReverse:
 		{
@@ -1034,10 +1195,23 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 		case IOR_ADC_Button:
 		case IOR_ADC:
 			// init ADC for given pin
+#if PLATFORM_XRADIO
+			OBK_HAL_ADC_Init(index);
+#else
 			HAL_ADC_Init(index);
+#endif
+			break; 
+		case IOR_Counter_f:
+			HAL_PIN_Setup_Input_Pullup(index);
+			HAL_AttachInterrupt(index, INTERRUPT_FALLING, PIN_InterruptHandler);
+			break;
+		case IOR_Counter_r:
+			HAL_PIN_Setup_Input_Pullup(index);
+			HAL_AttachInterrupt(index, INTERRUPT_RISING, PIN_InterruptHandler);
 			break;
 		case IOR_PWM_n:
 		case IOR_PWM_ScriptOnly:
+		case IOR_PWM_ScriptOnly_n:
 		case IOR_PWM:
 		{
 			int channelIndex;
@@ -1057,7 +1231,8 @@ void PIN_SetPinRoleForPinIndex(int index, int role) {
 
 			HAL_PIN_PWM_Start(index, useFreq);
 
-			if (role == IOR_PWM_n) {
+			if (role == IOR_PWM_n
+				|| role == IOR_PWM_ScriptOnly_n) {
 				// inversed PWM
 				HAL_PIN_PWM_Update(index, 100.0f - channelValue);
 			}
@@ -1134,7 +1309,7 @@ static void Channel_OnChanged(int ch, int prevValue, int iFlags) {
 			else if (g_cfg.pins.roles[i] == IOR_PWM || g_cfg.pins.roles[i] == IOR_PWM_ScriptOnly) {
 				HAL_PIN_PWM_Update(i, iVal);
 			}
-			else if (g_cfg.pins.roles[i] == IOR_PWM_n) {
+			else if (g_cfg.pins.roles[i] == IOR_PWM_n || g_cfg.pins.roles[i] == IOR_PWM_ScriptOnly_n) {
 				HAL_PIN_PWM_Update(i, 100 - iVal);
 			}
 		}
@@ -1207,6 +1382,7 @@ int ChannelType_GetDivider(int type) {
 	case ChType_EnergyTotal_kWh_div1000:
 	case ChType_EnergyExport_kWh_div1000:
 	case ChType_EnergyToday_kWh_div1000:
+	case ChType_EnergyImport_kWh_div1000:
 	case ChType_Current_div1000:
 	case ChType_LeakageCurrent_div1000:
 	case ChType_ReadOnly_div1000:
@@ -1248,6 +1424,7 @@ const char *ChannelType_GetUnit(int type) {
 	case ChType_EnergyExport_kWh_div1000:
 	case ChType_EnergyToday_kWh_div1000:
 	case ChType_EnergyTotal_kWh_div100:
+	case ChType_EnergyImport_kWh_div1000:
 		return "kWh";
 	case ChType_PowerFactor_div1000:
 	case ChType_PowerFactor_div100:
@@ -1303,6 +1480,8 @@ const char *ChannelType_GetTitle(int type) {
 		return "EnergyExport";
 	case ChType_EnergyToday_kWh_div1000:
 		return "EnergyToday";
+	case ChType_EnergyImport_kWh_div1000:
+		return "EnergyImport";
 	case ChType_PowerFactor_div1000:
 	case ChType_PowerFactor_div100:
 		return "PowerFactor";
@@ -1386,7 +1565,7 @@ void CHANNEL_Set_FloatPWM(int ch, float fVal, int iFlags) {
 			if (g_cfg.pins.roles[i] == IOR_PWM || g_cfg.pins.roles[i] == IOR_PWM_ScriptOnly) {
 				HAL_PIN_PWM_Update(i, fVal);
 			}
-			else if (g_cfg.pins.roles[i] == IOR_PWM_n) {
+			else if (g_cfg.pins.roles[i] == IOR_PWM_n || g_cfg.pins.roles[i] == IOR_PWM_ScriptOnly_n) {
 				HAL_PIN_PWM_Update(i, 100.0f - fVal);
 			}
 		}
@@ -1464,55 +1643,58 @@ void CHANNEL_Set_Ex(int ch, int iVal, int iFlags, int ausemovingaverage) {
 void CHANNEL_Set(int ch, int iVal, int iFlags) {
 	CHANNEL_Set_Ex(ch, iVal, iFlags, 0);
 }
+char *g_channelPingPongs = 0;
 
-void CHANNEL_AddClamped(int ch, int iVal, int min, int max, int bWrapInsteadOfClamp) {
-#if 0
-	int prevValue;
-	if (ch < 0 || ch >= CHANNEL_MAX) {
-		addLogAdv(LOG_ERROR, LOG_FEATURE_GENERAL, "CHANNEL_AddClamped: Channel index %i is out of range <0,%i)\n\r", ch, CHANNEL_MAX);
-		return;
-	}
-	prevValue = g_channelValues[ch];
-	g_channelValues[ch] = g_channelValues[ch] + iVal;
-
-	if (bWrapInsteadOfClamp) {
-		if (g_channelValues[ch] > max)
-			g_channelValues[ch] = min;
-		if (g_channelValues[ch] < min)
-			g_channelValues[ch] = max;
-	}
-	else {
-		if (g_channelValues[ch] > max)
-			g_channelValues[ch] = max;
-		if (g_channelValues[ch] < min)
-			g_channelValues[ch] = min;
-	}
-
-	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "CHANNEL_AddClamped channel %i has changed to %i\n\r", ch, g_channelValues[ch]);
-
-	Channel_OnChanged(ch, prevValue, 0);
-#else
+void CHANNEL_AddClamped(int ch, int iDelta, int min, int max, int bWrapInsteadOfClamp) {
 	// we want to support special channel indexes, so it's better to use GET/SET interface
 	// Special channel indexes are used to access things like dimmer, led colors, etc
-	iVal = CHANNEL_Get(ch) + iVal;
+	int newVal;;
 
-	if (bWrapInsteadOfClamp) {
-		if (iVal > max)
-			iVal = min;
-		if (iVal < min)
-			iVal = max;
+	if (bWrapInsteadOfClamp == 3) {
+		if (g_channelPingPongs) {
+			g_channelPingPongs[ch] *= -1;
+		}
+		return;
+	} else if (bWrapInsteadOfClamp == 2) {
+		// ping-pong logic
+		if (g_channelPingPongs == 0) {
+			g_channelPingPongs = (char*)malloc(CHANNEL_MAX);
+			memset(g_channelPingPongs, 1, CHANNEL_MAX);
+		}
+		int prevVal = CHANNEL_Get(ch);
+		newVal = prevVal + iDelta * g_channelPingPongs[ch];
+		if (prevVal == min && newVal < min) {
+			g_channelPingPongs[ch] *= -1;
+		}
+		else if (prevVal == max && newVal > max) {
+			g_channelPingPongs[ch] *= -1;
+		}
+		newVal = prevVal + iDelta * g_channelPingPongs[ch];
+		if (newVal > max) {
+			newVal = max;
+		}
+		else if (newVal < min) {
+			newVal = min;
+		}
+	} else if (bWrapInsteadOfClamp) {
+		newVal = CHANNEL_Get(ch) + iDelta;
+		if (newVal > max)
+			newVal = min;
+		if (newVal < min)
+			newVal = max;
 	}
 	else {
-		if (iVal > max)
-			iVal = max;
-		if (iVal < min)
-			iVal = min;
+		newVal = CHANNEL_Get(ch) + iDelta;
+		if (newVal > max)
+			newVal = max;
+		if (newVal < min)
+			newVal = min;
 	}
 
-	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "CHANNEL_AddClamped channel %i has changed to %i\n\r", ch, iVal);
+	addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, 
+		"CHANNEL_AddClamped channel %i has changed to %i\n\r", ch, newVal);
 
-	CHANNEL_Set(ch, iVal, 0);
-#endif
+	CHANNEL_Set(ch, newVal, 0);
 }
 void CHANNEL_Add(int ch, int iVal) {
 #if 0
@@ -1545,7 +1727,7 @@ int CHANNEL_FindMaxValueForChannel(int ch) {
 			if (g_cfg.pins.roles[i] == IOR_PWM || g_cfg.pins.roles[i] == IOR_PWM_ScriptOnly) {
 				return 100;
 			}
-			if (g_cfg.pins.roles[i] == IOR_PWM_n) {
+			if (g_cfg.pins.roles[i] == IOR_PWM_n || g_cfg.pins.roles[i] == IOR_PWM_ScriptOnly_n) {
 				return 100;
 			}
 		}
@@ -1638,14 +1820,19 @@ bool CHANNEL_IsInUse(int ch) {
 
 	for (i = 0; i < PLATFORM_GPIO_MAX; i++) {
 		if (g_cfg.pins.roles[i] != IOR_None) {
-			if (g_cfg.pins.channels[i] == ch) {
+			int NofC=PIN_IOR_NofChan(g_cfg.pins.roles[i]);
+			if (NofC>=1 && g_cfg.pins.channels[i] == ch) {
 				return true;
 			}
-			if (g_cfg.pins.channels2[i] == ch) {
+			if (NofC>=2 && g_cfg.pins.channels2[i] == ch) {
 				return true;
 			}
 		}
 	}
+#if (ENABLE_DRIVER_DS1820_FULL)
+#include "driver/drv_ds1820_full.h"
+	return ds18b20_used_channel(ch);
+#endif
 	return false;
 }
 
@@ -1725,6 +1912,7 @@ int CHANNEL_GetRoleForOutputChannel(int ch) {
 			case IOR_PWM_n:
 			case IOR_PWM:
 			case IOR_PWM_ScriptOnly:
+			case IOR_PWM_ScriptOnly_n:
 				return g_cfg.pins.roles[i];
 			case IOR_BridgeForward:
 			case IOR_BridgeReverse:
@@ -1909,6 +2097,9 @@ void PIN_ticks(void* param)
 	int i;
 	int value;
 
+
+	PIN_ApplyCounterDeltas();
+
 #if defined(PLATFORM_BEKEN) || defined(WINDOWS)
 	g_time = rtos_get_time();
 #else
@@ -1986,11 +2177,11 @@ void PIN_ticks(void* param)
 			activepoll_time = 1000; //20 x 50ms = 1s of polls after button release
 		}
 
-#if 1
+#if 0
 		if (g_cfg.pins.roles[i] == IOR_PWM || g_cfg.pins.roles[i] == IOR_PWM_ScriptOnly) {
 			HAL_PIN_PWM_Update(i, g_channelValuesFloats[g_cfg.pins.channels[i]]);
 		}
-		else if (g_cfg.pins.roles[i] == IOR_PWM_n) {
+		else if (g_cfg.pins.roles[i] == IOR_PWM_n || g_cfg.pins.roles[i] == IOR_PWM_ScriptOnly_n) {
 			// invert PWM value
 			HAL_PIN_PWM_Update(i, 100 - g_channelValuesFloats[g_cfg.pins.channels[i]]);
 		}
@@ -2048,30 +2239,40 @@ void PIN_ticks(void* param)
 #endif
 			}
 			else if (g_cfg.pins.roles[i] == IOR_ToggleChannelOnToggle) {
-				// we must detect a toggle, but with debouncing
 				value = PIN_ReadDigitalInputValue_WithInversionIncluded(i);
-				// debouncing
-				if (g_times[i] <= 0) {
-					if (g_lastValidState[i] != value) {
-						// became up
-						g_lastValidState[i] = value;
-
-
-						if (CFG_HasFlag(OBK_FLAG_BUTTON_DISABLE_ALL)) {
-							addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Child lock!");
+			
+				if (value) {
+					if (g_times[i] > debounceMS) {
+						if (g_lastValidState[i] != value) {
+							g_lastValidState[i] = value;
+			
+							if (!CFG_HasFlag(OBK_FLAG_BUTTON_DISABLE_ALL)) {
+								CHANNEL_Toggle(g_cfg.pins.channels[i]);
+								EventHandlers_FireEvent(CMD_EVENT_PIN_ONTOGGLE, i);
+							} else {
+								addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Child lock!");
+							}
 						}
-						else {
-							CHANNEL_Toggle(g_cfg.pins.channels[i]);
-							// fire event - IOR_ToggleChannelOnToggle has been toggle
-							// Argument is a pin number (NOT channel)
-							EventHandlers_FireEvent(CMD_EVENT_PIN_ONTOGGLE, i);
-						}
-						// lock for given time
-						g_times[i] = debounceMS;
+					} else {
+						g_times[i] += t_diff;
 					}
-				}
-				else {
-					g_times[i] -= t_diff;
+					g_times2[i] = 0;
+				} else {
+					if (g_times2[i] > debounceMS) {
+						if (g_lastValidState[i] != value) {
+							g_lastValidState[i] = value;
+			
+							if (!CFG_HasFlag(OBK_FLAG_BUTTON_DISABLE_ALL)) {
+								CHANNEL_Toggle(g_cfg.pins.channels[i]);
+								EventHandlers_FireEvent(CMD_EVENT_PIN_ONTOGGLE, i);
+							} else {
+								addLogAdv(LOG_INFO, LOG_FEATURE_GENERAL, "Child lock!");
+							}
+						}
+					} else {
+						g_times2[i] += t_diff;
+					}
+					g_times[i] = 0;
 				}
 			}
 	}
@@ -2187,6 +2388,12 @@ const char* g_channelTypeNames[] = {
 	"Tds",
 	"Motion_n",
 	"Frequency_div1000",
+	"OpenStopClose",
+	"Percent",
+	"StopUpDown",
+	"EnergyImport_kWh_div1000",
+	"Enum",
+	"ReadOnlyEnum",
 	"error",
 	"error",
 };
@@ -2375,6 +2582,7 @@ void PIN_get_Relay_PWM_Count(int* relayCount, int* pwmCount, int* dInputCount) {
 			//(*pwmCount)++;
 			break;
 		case IOR_PWM_ScriptOnly:
+		case IOR_PWM_ScriptOnly_n:
 			// DO NOT COUNT SCRIPTONLY PWM HERE!
 			// As in title - it's only for scripts. 
 			// It should not generate lights!
@@ -2554,7 +2762,7 @@ void PIN_AddCommands(void)
 #ifdef ENABLE_BL_MOVINGAVG
 	//cmddetail:{"name":"setMovingAvg","args":"MovingAvg",
 	//cmddetail:"descr":"Moving average value for power and current. <=1 disable, >=2 count of avg values. The setting is temporary and need to be set at startup.",
-	//cmddetail:"fn":"NULL);","file":"new_pins.c","requires":"",
+	//cmddetail:"fn":"CMD_setMovingAvg","file":"new_pins.c","requires":"",
 	//cmddetail:"examples":""}
 	CMD_RegisterCommand("setMovingAvg", CMD_setMovingAvg, NULL);
 #endif

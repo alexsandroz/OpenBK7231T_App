@@ -1,3 +1,14 @@
+OBK_DIR = $(TOP_DIR)/apps/$(APP_BIN_NAME)/
+
+BERRY_MODULEPATH = $(OBK_DIR)/src/berry/modules
+BERRY_SRCPATH = $(OBK_DIR)/libraries/berry/src/
+
+include $(OBK_DIR)/libraries/berry.mk
+
+SRC_C += $(BERRY_SRC_C)
+
+CPPDEFINES += -DOBK_VARIANT=$(OBK_VARIANT)
+
 ifeq ($(TARGET_PLATFORM),bk7231n)
 
 CFG_USE_MQTT_TLS ?= 1

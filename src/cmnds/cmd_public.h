@@ -13,6 +13,37 @@ typedef enum commandResult_e {
 
 } commandResult_t;
 
+typedef struct scriptFile_s
+{
+	char* fname;
+	char* data;
+
+	struct scriptFile_s* next;
+} scriptFile_t;
+
+typedef struct eventWait_s {
+	int waitingForArgument;
+	unsigned short waitingForEvent;
+	char waitingForRelation;
+	char waitingForArgumentStr[16];
+} eventWait_t;
+
+typedef struct scriptInstance_s
+{
+	scriptFile_t* curFile;
+	int uniqueID;
+	const char* curLine;
+	int totalDelayMS;
+	int currentDelayMS;
+	eventWait_t wait;
+	int delayRepeats;
+
+	struct scriptInstance_s* next;
+} scriptInstance_t;
+
+scriptInstance_t *SVM_RegisterThread();
+extern scriptInstance_t *g_scriptThreads;
+
 typedef commandResult_t(*commandHandler_t)(const void* context, const char* cmd, const char* args, int flags);
 
 // command was entered in console (web app etc)
@@ -31,13 +62,14 @@ typedef commandResult_t(*commandHandler_t)(const void* context, const char* cmd,
 #define COMMAND_FLAG_SOURCE_TELESENDER	64
 
 extern bool g_powersave;
+typedef struct command_s command_t;
 
 //
 void CMD_Init_Early();
 void CMD_Init_Delayed();
 void CMD_FreeAllCommands();
 void CMD_RunUartCmndIfRequired();
-void CMD_RegisterCommand(const char* name, commandHandler_t handler, void* context);
+command_t*CMD_RegisterCommand(const char* name, commandHandler_t handler, void* context);
 commandResult_t CMD_ExecuteCommand(const char* s, int cmdFlags);
 commandResult_t CMD_ExecuteCommandArgs(const char* cmd, const char* args, int cmdFlags);
 // like a strdup, but will expand constants.
@@ -128,11 +160,22 @@ enum EventCode {
 
 	CMD_EVENT_MISSEDHEARTBEATS,
 
+	CMD_EVENT_ON_MQTT,
+
+	CMD_EVENT_ON_DP,
+
+	CMD_EVENT_ON_HTTP,
+
+	CMD_EVENT_ON_CMD,
+
 	// must be lower than 256
 	CMD_EVENT_MAX_TYPES
 };
 
 int EVENT_ParseEventName(const char *s);
+
+// Helper to parse relation characters (<, >, !) from string arguments
+char parseRelationChar(const char *relationStr);
 
 // the slider control in the UI emits values
 //in the range from 154-500 (defined
@@ -190,8 +233,9 @@ void EventHandlers_FireEvent_String(byte eventCode, const char* argument);
 // This is useful to fire an event when, for example, a button is pressed.
 // Then eventCode is a BUTTON_PRESS and argument is a button index.
 void EventHandlers_FireEvent(byte eventCode, int argument);
-void EventHandlers_FireEvent2(byte eventCode, int argument, int argument2);
-void EventHandlers_FireEvent3(byte eventCode, int argument, int argument2, int argument3);
+int EventHandlers_FireEvent2(byte eventCode, int argument, int argument2);
+const char *EventHandlers_GetHandlerCommand2(byte eventCode, int argument, int argument2);
+int EventHandlers_FireEvent3(byte eventCode, int argument, int argument2, int argument3);
 // This is more advanced event handler. It will only fire handlers when a variable state changes from one to another.
 // For example, you can watch for Voltage from BL0942 to change below 230, and it will fire event only when it becomes below 230.
 void EventHandlers_ProcessVariableChange_Integer(byte eventCode, int oldValue, int newValue);
@@ -231,6 +275,7 @@ void LED_ToggleEnabled();
 bool LED_IsLedDriverChipRunning();
 bool LED_IsLEDRunning();
 void LED_SetEnableAll(int bEnable);
+void LED_SetStripStateOutputs();
 int LED_GetEnableAll();
 void LED_SaveStateToFlashVarsNow();
 void LED_GetBaseColorString(char* s);
@@ -267,9 +312,16 @@ int CMD_InitSendCommands();
 void CMD_StartTCPCommandLine();
 // cmd_script.c
 int CMD_GetCountActiveScriptThreads();
+// cmd_berry.c
+void CMD_InitBerry();
+void CMD_Berry_RunEventHandlers_IntInt(byte eventCode, int argument, int argument2);
+void CMD_Berry_RunEventHandlers_IntBytes(byte eventCode, int argument, const byte *data, int size);
+int CMD_Berry_RunEventHandlers_StrPtr(byte eventCode, const char *argument, void* argument2);
+int CMD_Berry_RunEventHandlers_Str(byte eventCode, const char *argument, const char *argument2);
 
 const char* CMD_GetResultString(commandResult_t r);
 
+void SVM_StartBacklog(const char *command);
 void SVM_RunThreads(int deltaMS);
 void CMD_InitScripting();
 void SVM_RunStartupCommandAsScript();
@@ -280,5 +332,6 @@ commandResult_t CMD_ClearAllHandlers(const void* context, const char* cmd, const
 commandResult_t RepeatingEvents_Cmd_ClearRepeatingEvents(const void* context, const char* cmd, const char* args, int cmdFlags);
 commandResult_t CMD_resetSVM(const void* context, const char* cmd, const char* args, int cmdFlags);
 int RepeatingEvents_GetActiveCount();
+
 
 #endif // __CMD_PUBLIC_H__

@@ -2,7 +2,7 @@
 #include "http_fns.h"
 #include "../new_pins.h"
 #include "../new_cfg.h"
-#include "../ota/ota.h"
+#include "../hal/hal_ota.h"
 // Commands register, execution API and cmd tokenizer
 #include "../cmnds/cmd_public.h"
 #include "../driver/drv_tuyaMCU.h"
@@ -20,6 +20,9 @@
 #include "../driver/drv_ntp.h"
 #include "../driver/drv_local.h"
 #include "../driver/drv_bl_shared.h"
+#include "../driver/drv_ds1820_simple.h"
+#include "../driver/drv_ds1820_full.h"
+
 
 #if ENABLE_TASMOTA_JSON
 
@@ -261,6 +264,10 @@ static int http_tasmota_json_SENSOR(void* request, jsonCb_t printer) {
 	float chan_val1, chan_val2;
 	int channel_1, channel_2, g_pin_1 = 0;
 	printer(request, ",");
+#ifndef NO_CHIP_TEMPERATURE
+//		printer(request, "\"%s\":{\"Temperature\": %.1f},", PLATFORM_MCU_NAME, g_wifi_temperature);
+		printer(request, "\"ESP32\":{\"Temperature\": %.1f},", g_wifi_temperature);
+#endif
 	if (DRV_IsRunning("SHT3X")) {
 		g_pin_1 = PIN_FindPinIndexForRole(IOR_SHT3X_DAT, g_pin_1);
 		channel_1 = g_cfg.pins.channels[g_pin_1];
@@ -278,6 +285,36 @@ static int http_tasmota_json_SENSOR(void* request, jsonCb_t printer) {
 		// close ENERGY block
 		printer(request, "},");
 	}
+#if (ENABLE_DRIVER_DS1820)
+	if (DRV_IsRunning("DS1820")) {		//DS1820_simple.c with one sensor
+		g_pin_1 = PIN_FindPinIndexForRole(IOR_DS1820_IO, g_pin_1);
+		channel_1 = g_cfg.pins.channels[g_pin_1];
+		chan_val1 = CHANNEL_GetFloat(channel_1) / 100.0f;
+
+		// writer header
+		printer(request, "\"DS18B20\":");
+		// following check will clear NaN values
+		printer(request, "{");
+		printer(request, "\"Temperature\": %.1f", chan_val1);
+		// close ENERGY block
+		printer(request, "},");
+	}
+#endif
+#if (ENABLE_DRIVER_DS1820_FULL)
+	if (DRV_IsRunning("DS1820_full")) {		//DS1820_full.c with possibly multiple sensors
+		char *str = DS1820_full_jsonSensors();
+		int toprint = strlen(str);
+		while (*str && toprint > 250) {		// string can be long, longer than request, this would break output if not split
+			char t = str[250];
+			str[250]=0;
+			printer(request, str);
+			str[250]=t;
+			str+=250;
+			toprint -= 250;
+		}	 
+		printer(request, str);
+	}
+#endif
 	if (DRV_IsRunning("CHT83XX")) {
 		g_pin_1 = PIN_FindPinIndexForRole(IOR_CHT83XX_DAT, g_pin_1);
 		channel_1 = g_cfg.pins.channels[g_pin_1];
@@ -295,6 +332,7 @@ static int http_tasmota_json_SENSOR(void* request, jsonCb_t printer) {
 		// close ENERGY block
 		printer(request, "},");
 	}
+
 	for (int i = 0; i < PLATFORM_GPIO_MAX; i++) {
 		int role = PIN_GetPinRoleForPinIndex(i);
 		if (role != IOR_DHT11 && role != IOR_DHT12 && role != IOR_DHT21 && role != IOR_DHT22)
@@ -374,7 +412,11 @@ static int http_tasmota_json_status_SNS(void* request, jsonCb_t printer, bool bA
 		bHasAnyDHT = true;
 		break;
 	}
+#ifdef NO_CHIP_TEMPERATURE	
 	if (DRV_IsSensor() || bHasAnyDHT) {
+#else
+	if (1) {
+#endif
 		http_tasmota_json_SENSOR(request, printer);
 		JSON_PrintKeyValue_String(request, printer, "TempUnit", "C", false);
 	}
@@ -384,20 +426,6 @@ static int http_tasmota_json_status_SNS(void* request, jsonCb_t printer, bool bA
 
 	return 0;
 }
-
-#ifdef PLATFORM_XR809
-//XR809 does not support drivers but its build script compiles many drivers including ntp.
-
-#else
-#ifndef ENABLE_NTP
-unsigned int NTP_GetCurrentTime() {
-	return 0;
-}
-unsigned int NTP_GetCurrentTimeWithoutOffset() {
-	return 0;
-}
-#endif
-#endif
 
 // Topic:  tele/tasmota_48E7F3/STATE
 // Sample:
@@ -449,9 +477,16 @@ static int http_tasmota_json_status_STS(void* request, jsonCb_t printer, bool bA
 	JSON_PrintKeyValue_String(request, printer, "Uptime", buff, true);
 	//JSON_PrintKeyValue_String(request, printer, "Uptime", "30T02:59:30", true);
 	JSON_PrintKeyValue_Int(request, printer, "UptimeSec", g_secondsElapsed, true);
-	JSON_PrintKeyValue_Int(request, printer, "Heap", 25, true);
-	JSON_PrintKeyValue_String(request, printer, "SleepMode", "Dynamic", true);
-	JSON_PrintKeyValue_Int(request, printer, "Sleep", 10, true);
+	// it seems to be in range like 20-30 on ESP8266 Tasmota, so I guess KB
+	JSON_PrintKeyValue_Int(request, printer, "Heap", xPortGetFreeHeapSize()/1024, true);
+	if (g_powersave) {
+		JSON_PrintKeyValue_String(request, printer, "SleepMode", "Dynamic", true);
+		JSON_PrintKeyValue_Int(request, printer, "Sleep", 10, true);
+	}
+	else {
+		JSON_PrintKeyValue_String(request, printer, "SleepMode", "None", true);
+		JSON_PrintKeyValue_Int(request, printer, "Sleep", 0, true);
+	}
 	JSON_PrintKeyValue_Int(request, printer, "LoadAvg", 99, true);
 	JSON_PrintKeyValue_Int(request, printer, "MqttCount", 23, true);
 #ifdef ENABLE_DRIVER_BATTERY
@@ -464,8 +499,10 @@ static int http_tasmota_json_status_STS(void* request, jsonCb_t printer, bool bA
 	printer(request, "\"Wifi\":{"); // open WiFi
 	JSON_PrintKeyValue_Int(request, printer, "AP", 1, true);
 	JSON_PrintKeyValue_String(request, printer, "SSId", CFG_GetWiFiSSID(), true);
-	JSON_PrintKeyValue_String(request, printer, "BSSId", "30:B5:C2:5D:70:72", true);
-	JSON_PrintKeyValue_Int(request, printer, "Channel", 11, true);
+
+	JSON_PrintKeyValue_String(request, printer, "BSSId", g_wifi_bssid, true);
+	JSON_PrintKeyValue_Int(request, printer, "Channel", g_wifi_channel, true);
+
 	JSON_PrintKeyValue_String(request, printer, "Mode", "11n", true);
 	JSON_PrintKeyValue_Int(request, printer, "RSSI", (HAL_GetWifiStrength() + 100) * 2, true);
 	JSON_PrintKeyValue_Int(request, printer, "Signal", HAL_GetWifiStrength(), true);
