@@ -966,18 +966,7 @@ static commandResult_t CMD_WebServer(const void* context, const char* cmd, const
 				ADDLOG_INFO(LOG_FEATURE_CMD, "WebServer already enabled");
 				return CMD_RES_OK;
 			}			
-			ADDLOG_INFO(LOG_FEATURE_CMD, "Enable WebServer and restart");
-			CFG_SetDisableWebServer(false);
-			CFG_Save_IfThereArePendingChanges();
-			HAL_RebootModule();
-			return CMD_RES_OK;
-		}
-		else if (strcmp(Tokenizer_GetArg(0), "2") == 0) {
-			if (!CFG_GetDisableWebServer()) {
-				ADDLOG_INFO(LOG_FEATURE_CMD, "WebServer already enabled");
-				return CMD_RES_OK;
-			}			
-			ADDLOG_INFO(LOG_FEATURE_CMD, "Enable WebServer NO RESTART");
+			ADDLOG_INFO(LOG_FEATURE_CMD, "Enable WebServer");
 			CFG_SetDisableWebServer(false);
 			CFG_Save_IfThereArePendingChanges();
 			HTTPServer_Start();
